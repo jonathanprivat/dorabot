@@ -1,10 +1,50 @@
-import { useRef, useCallback, useEffect } from 'react';
+import { useRef, useCallback, useEffect, useMemo } from 'react';
 import Editor, { loader, type OnMount } from '@monaco-editor/react';
 import type { editor as monacoEditor } from 'monaco-editor';
 import { useTheme } from '../../hooks/useTheme';
 
-// Configure Monaco to load from node_modules (works offline in Electron)
-loader.config({ paths: { vs: new URL('monaco-editor/min/vs', import.meta.url).href } });
+// Configure Monaco workers for Vite (avoids console warnings)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+(self as any).MonacoEnvironment = {
+  getWorker(_moduleId: string, label: string) {
+    switch (label) {
+      case 'json':
+        return new Worker(
+          new URL('monaco-editor/esm/vs/language/json/json.worker', import.meta.url),
+          { type: 'module' }
+        );
+      case 'css':
+      case 'scss':
+      case 'less':
+        return new Worker(
+          new URL('monaco-editor/esm/vs/language/css/css.worker', import.meta.url),
+          { type: 'module' }
+        );
+      case 'html':
+      case 'handlebars':
+      case 'razor':
+        return new Worker(
+          new URL('monaco-editor/esm/vs/language/html/html.worker', import.meta.url),
+          { type: 'module' }
+        );
+      case 'typescript':
+      case 'javascript':
+        return new Worker(
+          new URL('monaco-editor/esm/vs/language/typescript/ts.worker', import.meta.url),
+          { type: 'module' }
+        );
+      default:
+        return new Worker(
+          new URL('monaco-editor/esm/vs/editor/editor.worker', import.meta.url),
+          { type: 'module' }
+        );
+    }
+  },
+};
+
+// Use bundled monaco-editor directly (no CDN, works offline in Electron)
+import * as monaco from 'monaco-editor';
+loader.config({ monaco });
 
 const EXT_TO_LANG: Record<string, string> = {
   js: 'javascript', jsx: 'javascript', ts: 'typescript', tsx: 'typescript',
@@ -23,7 +63,6 @@ const EXT_TO_LANG: Record<string, string> = {
 
 function getMonacoLanguage(filePath: string): string {
   const name = filePath.split('/').pop() || '';
-  // Handle extensionless files like Makefile, Dockerfile
   if (EXT_TO_LANG[name]) return EXT_TO_LANG[name];
   const ext = name.split('.').pop()?.toLowerCase() || '';
   return EXT_TO_LANG[ext] || 'plaintext';
@@ -46,29 +85,65 @@ export function MonacoEditor({ content, filePath, readOnly = false, onSave, onDi
   onSaveRef.current = onSave;
   onDirtyChangeRef.current = onDirtyChange;
 
-  // Update original content ref when content prop changes (file watcher reload)
+  // Track whether user has made edits (vs content prop changing)
+  const userDirtyRef = useRef(false);
+
+  // Update content when prop changes (file watcher reload)
   useEffect(() => {
     originalContentRef.current = content;
     const editor = editorRef.current;
-    if (editor) {
-      const currentValue = editor.getValue();
-      if (currentValue !== content) {
-        // Only update if not dirty, to avoid overwriting user edits
-        const isDirty = currentValue !== content;
-        if (!isDirty || readOnly) {
-          editor.setValue(content);
-        }
+    if (!editor) return;
+
+    const currentValue = editor.getValue();
+    if (currentValue === content) return;
+
+    // Only update if user hasn't made edits, or we're in readOnly mode
+    if (!userDirtyRef.current || readOnly) {
+      // Use executeEdits to preserve undo stack
+      const model = editor.getModel();
+      if (model) {
+        editor.executeEdits('file-reload', [{
+          range: model.getFullModelRange(),
+          text: content,
+          forceMoveMarkers: true,
+        }]);
       }
+      userDirtyRef.current = false;
     }
   }, [content, readOnly]);
+
+  // Sync readOnly and related options when they change
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    editor.updateOptions({
+      readOnly,
+      renderLineHighlight: readOnly ? 'none' : 'line',
+      cursorStyle: readOnly ? 'line-thin' : 'line',
+    });
+  }, [readOnly]);
+
+  // Dispose editor on unmount
+  useEffect(() => {
+    return () => {
+      const editor = editorRef.current;
+      if (editor) {
+        const model = editor.getModel();
+        editor.dispose();
+        // Dispose model if no other editor uses it
+        if (model) model.dispose();
+        editorRef.current = null;
+      }
+    };
+  }, []);
 
   const handleMount: OnMount = useCallback((editor) => {
     editorRef.current = editor;
 
     // Cmd+S save
     editor.addCommand(
-      // Monaco.KeyMod.CtrlCmd | Monaco.KeyCode.KeyS
-      2048 | 49, // CtrlCmd = 2048, KeyS = 49
+      // KeyMod.CtrlCmd | KeyCode.KeyS
+      2048 | 49,
       () => {
         const value = editor.getValue();
         onSaveRef.current?.(value);
@@ -79,14 +154,44 @@ export function MonacoEditor({ content, filePath, readOnly = false, onSave, onDi
     editor.onDidChangeModelContent(() => {
       const value = editor.getValue();
       const isDirty = value !== originalContentRef.current;
+      userDirtyRef.current = isDirty;
       onDirtyChangeRef.current?.(isDirty);
     });
 
-    // Focus the editor
     editor.focus();
   }, []);
 
   const language = getMonacoLanguage(filePath);
+
+  // Memoize options to avoid unnecessary re-renders
+  const options = useMemo<monacoEditor.IStandaloneEditorConstructionOptions>(() => ({
+    readOnly,
+    fontSize: 13,
+    lineHeight: 1.5,
+    minimap: { enabled: false },
+    scrollBeyondLastLine: false,
+    wordWrap: 'off',
+    automaticLayout: true,
+    padding: { top: 8, bottom: 8 },
+    scrollbar: {
+      verticalScrollbarSize: 10,
+      horizontalScrollbarSize: 10,
+    },
+    renderLineHighlight: readOnly ? 'none' : 'line',
+    cursorStyle: readOnly ? 'line-thin' : 'line',
+    lineNumbers: 'on',
+    folding: true,
+    bracketPairColorization: { enabled: true },
+    guides: { bracketPairs: true, indentation: true },
+    tabSize: 2,
+    insertSpaces: true,
+    smoothScrolling: true,
+    contextmenu: true,
+    quickSuggestions: false,
+    suggestOnTriggerCharacters: false,
+    parameterHints: { enabled: false },
+    hover: { enabled: false },
+  }), [readOnly]);
 
   return (
     <Editor
@@ -94,34 +199,7 @@ export function MonacoEditor({ content, filePath, readOnly = false, onSave, onDi
       language={language}
       theme={theme === 'dark' ? 'vs-dark' : 'vs'}
       onMount={handleMount}
-      options={{
-        readOnly,
-        fontSize: 13,
-        lineHeight: 1.5,
-        minimap: { enabled: false },
-        scrollBeyondLastLine: false,
-        wordWrap: 'off',
-        automaticLayout: true,
-        padding: { top: 8, bottom: 8 },
-        scrollbar: {
-          verticalScrollbarSize: 10,
-          horizontalScrollbarSize: 10,
-        },
-        renderLineHighlight: readOnly ? 'none' : 'line',
-        cursorStyle: readOnly ? 'line-thin' : 'line',
-        lineNumbers: 'on',
-        folding: true,
-        bracketPairColorization: { enabled: true },
-        guides: { bracketPairs: true, indentation: true },
-        tabSize: 2,
-        insertSpaces: true,
-        smoothScrolling: true,
-        contextmenu: true,
-        quickSuggestions: false,
-        suggestOnTriggerCharacters: false,
-        parameterHints: { enabled: false },
-        hover: { enabled: false },
-      }}
+      options={options}
       loading={
         <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
           Loading editor...
