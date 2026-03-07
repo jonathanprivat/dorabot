@@ -6,6 +6,7 @@ publish:
   provider: github
   owner: suitedaces
   repo: dorabot
+  releaseType: release
 
 directories:
   output: release
