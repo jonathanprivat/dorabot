@@ -11,7 +11,9 @@ import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Shield, Brain, Globe, Settings2, Box, Lock, FolderLock, X, Plus, Wrench, Activity, Sun, Check } from 'lucide-react';
+import { Shield, Brain, Globe, Settings2, Box, Lock, FolderLock, X, Plus, Wrench, Activity, Sun, Check, Sparkles } from 'lucide-react';
+import { PALETTES } from '../lib/palettes';
+import type { Palette } from '../lib/palettes';
 
 type Props = {
   gateway: ReturnType<typeof useGateway>;
@@ -19,7 +21,7 @@ type Props = {
 
 export function SettingsView({ gateway }: Props) {
   const [settingsTab, setSettingsTab] = useState<'config' | 'tools' | 'status'>('config');
-  const { theme, setTheme } = useTheme();
+  const { theme, palette, glass, setTheme, setPalette, setGlass } = useTheme();
   const cfg = gateway.configData as Record<string, any> | null;
   const disabled = gateway.connectionState !== 'connected' || !cfg;
 
@@ -76,12 +78,54 @@ export function SettingsView({ gateway }: Props) {
                 <Sun className="w-4 h-4 text-primary" />
                 <span className="text-xs font-semibold">Appearance</span>
               </div>
-              <SettingRow label="dark mode" description="switch between light and dark theme">
-                <Switch
-                  size="sm"
-                  checked={theme === 'dark'}
-                  onCheckedChange={(checked) => setTheme(checked ? 'dark' : 'light')}
-                />
+
+              {/* color grid */}
+              <div className="grid grid-cols-3 gap-2 mb-4">
+                {PALETTES.map(p => (
+                  <button
+                    key={p.id}
+                    onClick={() => setPalette(p.id)}
+                    className={`relative rounded-lg overflow-hidden border-2 transition-all ${
+                      palette === p.id
+                        ? 'border-primary ring-1 ring-primary/30 scale-[1.02]'
+                        : 'border-transparent hover:border-border'
+                    }`}
+                  >
+                    {/* swatch preview */}
+                    <div className="h-12 flex flex-col" style={{ background: p.preview.bg }}>
+                      <div className="flex-1 flex items-center px-2 gap-1">
+                        <div className="w-6 h-1 rounded-full" style={{ background: p.preview.fg, opacity: 0.6 }} />
+                        <div className="w-4 h-1 rounded-full" style={{ background: p.preview.fg, opacity: 0.3 }} />
+                      </div>
+                      <div className="h-1.5 flex">
+                        <div className="flex-1" style={{ background: p.preview.accent }} />
+                        <div className="flex-1" style={{ background: p.preview.accent2 }} />
+                      </div>
+                    </div>
+                    <div className="px-2 py-1.5" style={{ background: p.preview.bg }}>
+                      <span className="text-[9px] font-medium" style={{ color: p.preview.fg }}>
+                        {p.label}
+                      </span>
+                    </div>
+                    {palette === p.id && (
+                      <div className="absolute top-1 right-1 w-4 h-4 rounded-full bg-primary flex items-center justify-center">
+                        <Check className="w-2.5 h-2.5 text-primary-foreground" />
+                      </div>
+                    )}
+                  </button>
+                ))}
+              </div>
+
+              {/* glass toggle */}
+              <SettingRow label="liquid glass" description="frosted translucent panels and sidebar">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-3 h-3 text-muted-foreground" />
+                  <Switch
+                    size="sm"
+                    checked={glass}
+                    onCheckedChange={setGlass}
+                  />
+                </div>
               </SettingRow>
             </CardContent>
           </Card>

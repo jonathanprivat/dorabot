@@ -4,9 +4,20 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <script>
-      if (localStorage.getItem('theme') === 'dark' || (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
-        document.documentElement.classList.add('dark');
-      }
+      (function() {
+        var palette = localStorage.getItem('palette');
+        var darkPalettes = ['default-dark', 'catppuccin-mocha', 'rose-pine'];
+        if (palette) {
+          document.documentElement.setAttribute('data-palette', palette);
+          if (darkPalettes.indexOf(palette) !== -1) document.documentElement.classList.add('dark');
+        } else if (localStorage.getItem('theme') === 'dark' || (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+          document.documentElement.classList.add('dark');
+          document.documentElement.setAttribute('data-palette', 'default-dark');
+        } else {
+          document.documentElement.setAttribute('data-palette', 'default-light');
+        }
+        if (localStorage.getItem('glass') === 'true') document.documentElement.setAttribute('data-glass', 'true');
+      })();
     </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />

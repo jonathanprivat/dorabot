@@ -143,6 +143,225 @@
   --stream-bubble-default: oklch(0.18 0.01 280 / 0.75);
 }
 
+/* ─── Catppuccin Mocha (dark pastel) ─── */
+[data-palette="catppuccin-mocha"] {
+  --background: #1e1e2e;
+  --foreground: #cdd6f4;
+  --card: #181825ee;
+  --card-foreground: #cdd6f4;
+  --popover: #181825f2;
+  --popover-foreground: #cdd6f4;
+  --primary: #cba6f7;
+  --primary-foreground: #1e1e2e;
+  --secondary: #31324499;
+  --secondary-foreground: #cdd6f4;
+  --muted: #31324480;
+  --muted-foreground: #a6adc8;
+  --accent: #31324480;
+  --accent-foreground: #cdd6f4;
+  --destructive: #f38ba8;
+  --destructive-foreground: #1e1e2e;
+  --border: #45475a66;
+  --input: #31324480;
+  --ring: #cba6f7;
+  --chart-1: #89b4fa;
+  --chart-2: #a6e3a1;
+  --chart-3: #f9e2af;
+  --chart-4: #cba6f7;
+  --chart-5: #f38ba8;
+  --sidebar: #11111b40;
+  --sidebar-foreground: #cdd6f4;
+  --sidebar-primary: #cba6f7;
+  --sidebar-primary-foreground: #1e1e2e;
+  --sidebar-accent: #31324466;
+  --sidebar-accent-foreground: #cdd6f4;
+  --sidebar-border: #45475a40;
+  --sidebar-ring: #cba6f7;
+  --success: #a6e3a1;
+  --warning: #f9e2af;
+  --stream-deep: #181825cc;
+  --stream-base: #1e1e2ecc;
+  --stream-mid: #24243acc;
+  --stream-raised: #2a2a40cc;
+  --stream-elevated: #313244dd;
+  --stream-bubble-wa: #a6e3a130;
+  --stream-bubble-tg: #89b4fa30;
+  --stream-bubble-default: #31324480;
+}
+
+/* ─── Catppuccin Latte (light pastel) ─── */
+[data-palette="catppuccin-latte"] {
+  --background: #eff1f5;
+  --foreground: #4c4f69;
+  --card: #e6e9efe8;
+  --card-foreground: #4c4f69;
+  --popover: #e6e9eff2;
+  --popover-foreground: #4c4f69;
+  --primary: #8839ef;
+  --primary-foreground: #eff1f5;
+  --secondary: #ccd0dab3;
+  --secondary-foreground: #4c4f69;
+  --muted: #ccd0dab3;
+  --muted-foreground: #6c6f85;
+  --accent: #ccd0dab3;
+  --accent-foreground: #4c4f69;
+  --destructive: #d20f39;
+  --destructive-foreground: #eff1f5;
+  --border: #acb0be8c;
+  --input: #ccd0dab3;
+  --ring: #8839ef;
+  --chart-1: #1e66f5;
+  --chart-2: #40a02b;
+  --chart-3: #df8e1d;
+  --chart-4: #8839ef;
+  --chart-5: #d20f39;
+  --sidebar: #dce0e840;
+  --sidebar-foreground: #4c4f69;
+  --sidebar-primary: #8839ef;
+  --sidebar-primary-foreground: #eff1f5;
+  --sidebar-accent: #ccd0da66;
+  --sidebar-accent-foreground: #4c4f69;
+  --sidebar-border: #acb0be4d;
+  --sidebar-ring: #8839ef;
+  --success: #40a02b;
+  --warning: #df8e1d;
+  --stream-deep: #eff1f5dd;
+  --stream-base: #e6e9efdd;
+  --stream-mid: #dce0e8e0;
+  --stream-raised: #d5d9e2e0;
+  --stream-elevated: #ccd0dae8;
+  --stream-bubble-wa: #40a02b22;
+  --stream-bubble-tg: #1e66f522;
+  --stream-bubble-default: #ccd0da80;
+}
+
+/* ─── Rosé Pine (dark warm) ─── */
+[data-palette="rose-pine"] {
+  --background: #191724;
+  --foreground: #e0def4;
+  --card: #1f1d2ee8;
+  --card-foreground: #e0def4;
+  --popover: #1f1d2ef2;
+  --popover-foreground: #e0def4;
+  --primary: #c4a7e7;
+  --primary-foreground: #191724;
+  --secondary: #26233a99;
+  --secondary-foreground: #e0def4;
+  --muted: #26233a80;
+  --muted-foreground: #908caa;
+  --accent: #26233a80;
+  --accent-foreground: #e0def4;
+  --destructive: #eb6f92;
+  --destructive-foreground: #191724;
+  --border: #6e6a8666;
+  --input: #26233a80;
+  --ring: #c4a7e7;
+  --chart-1: #9ccfd8;
+  --chart-2: #c4a7e7;
+  --chart-3: #f6c177;
+  --chart-4: #ebbcba;
+  --chart-5: #eb6f92;
+  --sidebar: #12101e40;
+  --sidebar-foreground: #e0def4;
+  --sidebar-primary: #c4a7e7;
+  --sidebar-primary-foreground: #191724;
+  --sidebar-accent: #26233a66;
+  --sidebar-accent-foreground: #e0def4;
+  --sidebar-border: #6e6a8640;
+  --sidebar-ring: #c4a7e7;
+  --success: #9ccfd8;
+  --warning: #f6c177;
+  --stream-deep: #12101ecc;
+  --stream-base: #191724cc;
+  --stream-mid: #1f1d2ecc;
+  --stream-raised: #26233acc;
+  --stream-elevated: #2a2740dd;
+  --stream-bubble-wa: #9ccfd830;
+  --stream-bubble-tg: #31748f30;
+  --stream-bubble-default: #26233a80;
+}
+
+/* ─── Rosé Pine Dawn (light warm) ─── */
+[data-palette="rose-pine-dawn"] {
+  --background: #faf4ed;
+  --foreground: #575279;
+  --card: #fffaf3e8;
+  --card-foreground: #575279;
+  --popover: #fffaf3f2;
+  --popover-foreground: #575279;
+  --primary: #907aa9;
+  --primary-foreground: #faf4ed;
+  --secondary: #f2e9e1b3;
+  --secondary-foreground: #575279;
+  --muted: #f2e9e1b3;
+  --muted-foreground: #797593;
+  --accent: #f2e9e1b3;
+  --accent-foreground: #575279;
+  --destructive: #b4637a;
+  --destructive-foreground: #faf4ed;
+  --border: #9893a54d;
+  --input: #f2e9e1b3;
+  --ring: #907aa9;
+  --chart-1: #286983;
+  --chart-2: #56949f;
+  --chart-3: #ea9d34;
+  --chart-4: #907aa9;
+  --chart-5: #b4637a;
+  --sidebar: #f2e9e140;
+  --sidebar-foreground: #575279;
+  --sidebar-primary: #907aa9;
+  --sidebar-primary-foreground: #faf4ed;
+  --sidebar-accent: #f2e9e166;
+  --sidebar-accent-foreground: #575279;
+  --sidebar-border: #9893a540;
+  --sidebar-ring: #907aa9;
+  --success: #56949f;
+  --warning: #ea9d34;
+  --stream-deep: #faf4eddd;
+  --stream-base: #f5efe8dd;
+  --stream-mid: #f2e9e1e0;
+  --stream-raised: #ece4dbe0;
+  --stream-elevated: #e4ddd3e8;
+  --stream-bubble-wa: #56949f22;
+  --stream-bubble-tg: #28698322;
+  --stream-bubble-default: #f2e9e180;
+}
+
+/* ─── Liquid Glass modifier ─── */
+[data-glass="true"] [data-slot="resizable-panel"],
+[data-glass="true"] .glass-panel {
+  backdrop-filter: blur(20px) saturate(1.6);
+  -webkit-backdrop-filter: blur(20px) saturate(1.6);
+}
+
+[data-glass="true"] .glass-sidebar {
+  backdrop-filter: blur(24px) saturate(1.8);
+  -webkit-backdrop-filter: blur(24px) saturate(1.8);
+  background: color-mix(in srgb, var(--sidebar) 60%, transparent) !important;
+  border-right: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
+}
+
+[data-glass="true"] .glass-header {
+  backdrop-filter: blur(16px) saturate(1.5);
+  -webkit-backdrop-filter: blur(16px) saturate(1.5);
+  background: color-mix(in srgb, var(--background) 70%, transparent) !important;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 30%, transparent);
+}
+
+[data-glass="true"] .glass-card {
+  backdrop-filter: blur(12px) saturate(1.4);
+  -webkit-backdrop-filter: blur(12px) saturate(1.4);
+  background: color-mix(in srgb, var(--card) 65%, transparent) !important;
+  border: 1px solid color-mix(in srgb, var(--border) 35%, transparent);
+  box-shadow: 0 4px 24px color-mix(in srgb, var(--background) 20%, transparent);
+}
+
+[data-glass="true"] .glass-tab-bar {
+  backdrop-filter: blur(12px) saturate(1.4);
+  -webkit-backdrop-filter: blur(12px) saturate(1.4);
+  background: color-mix(in srgb, var(--background) 65%, transparent) !important;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

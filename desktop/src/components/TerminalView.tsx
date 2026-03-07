@@ -3,6 +3,8 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
+import type { Palette } from '../lib/palettes';
+import { getPalette } from '../lib/palettes';
 
 type Props = {
   shellId: string;
@@ -10,59 +12,19 @@ type Props = {
   rpc: (method: string, params?: Record<string, unknown>) => Promise<unknown>;
   onShellEvent?: (listener: (data: { shellId: string; type: string; data?: string }) => void) => () => void;
   theme?: 'dark' | 'light';
+  palette?: Palette;
 };
 
-const DARK_THEME = {
-  background: '#1a1a1a',
-  foreground: '#d4d4d4',
-  cursor: '#d4d4d4',
-  cursorAccent: '#1a1a1a',
-  selectionBackground: '#264f78',
-  selectionForeground: '#ffffff',
-  black: '#1a1a1a',
-  red: '#f44747',
-  green: '#6a9955',
-  yellow: '#d7ba7d',
-  blue: '#569cd6',
-  magenta: '#c586c0',
-  cyan: '#4ec9b0',
-  white: '#d4d4d4',
-  brightBlack: '#808080',
-  brightRed: '#f44747',
-  brightGreen: '#6a9955',
-  brightYellow: '#d7ba7d',
-  brightBlue: '#569cd6',
-  brightMagenta: '#c586c0',
-  brightCyan: '#4ec9b0',
-  brightWhite: '#ffffff',
-};
+function getTerminalTheme(palette?: Palette, theme?: 'dark' | 'light') {
+  if (palette) {
+    return getPalette(palette).terminal;
+  }
+  // Fallback for when no palette is passed
+  const p = (localStorage.getItem('palette') as Palette) || (theme === 'dark' ? 'default-dark' : 'default-light');
+  return getPalette(p).terminal;
+}
 
-const LIGHT_THEME = {
-  background: '#ffffff',
-  foreground: '#383a42',
-  cursor: '#383a42',
-  cursorAccent: '#ffffff',
-  selectionBackground: '#add6ff',
-  selectionForeground: '#000000',
-  black: '#383a42',
-  red: '#e45649',
-  green: '#50a14f',
-  yellow: '#c18401',
-  blue: '#4078f2',
-  magenta: '#a626a4',
-  cyan: '#0184bc',
-  white: '#fafafa',
-  brightBlack: '#a0a1a7',
-  brightRed: '#e45649',
-  brightGreen: '#50a14f',
-  brightYellow: '#c18401',
-  brightBlue: '#4078f2',
-  brightMagenta: '#a626a4',
-  brightCyan: '#0184bc',
-  brightWhite: '#ffffff',
-};
-
-export function TerminalView({ shellId, cwd, rpc, onShellEvent, theme = 'dark' }: Props) {
+export function TerminalView({ shellId, cwd, rpc, onShellEvent, theme = 'dark', palette }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -79,7 +41,7 @@ export function TerminalView({ shellId, cwd, rpc, onShellEvent, theme = 'dark' }
       lineHeight: 1.4,
       cursorBlink: true,
       cursorStyle: 'bar',
-      theme: theme === 'dark' ? DARK_THEME : LIGHT_THEME,
+      theme: getTerminalTheme(palette, theme),
       allowProposedApi: true,
       scrollback: 5000,
       convertEol: true,
@@ -119,9 +81,9 @@ export function TerminalView({ shellId, cwd, rpc, onShellEvent, theme = 'dark' }
   // Update theme
   useEffect(() => {
     if (terminalRef.current) {
-      terminalRef.current.options.theme = theme === 'dark' ? DARK_THEME : LIGHT_THEME;
+      terminalRef.current.options.theme = getTerminalTheme(palette, theme);
     }
-  }, [theme]);
+  }, [theme, palette]);
 
   // Spawn shell and wire up I/O
   useEffect(() => {
@@ -175,7 +137,7 @@ export function TerminalView({ shellId, cwd, rpc, onShellEvent, theme = 'dark' }
   }, [shellId, onShellEvent]);
 
   return (
-    <div className={`flex flex-col h-full min-h-0 ${theme === 'dark' ? 'bg-[#1a1a1a]' : 'bg-white'}`}>
+    <div className="flex flex-col h-full min-h-0" style={{ background: getTerminalTheme(palette, theme).background }}>
       <div
         ref={containerRef}
         className="flex-1 min-h-0 p-1"

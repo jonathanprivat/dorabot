@@ -17,6 +17,7 @@ import { FileViewer } from './FileViewer';
 import { DiffViewer } from './viewers/DiffViewer';
 import { TerminalView } from './TerminalView';
 import { ErrorBoundary } from './ErrorBoundary';
+import { useTheme } from '../hooks/useTheme';
 import { cn } from '@/lib/utils';
 
 // VS Code-style drop zone inside a panel — shows quadrant highlights when dragging
@@ -83,6 +84,7 @@ export function EditorGroupPanel({
   onSplitRight,
   onSplitDown,
 }: Props) {
+  const { theme, palette } = useTheme();
   const groupTabs = group.tabIds
     .map(id => tabs.find(t => t.id === id))
     .filter(Boolean) as Tab[];
@@ -118,6 +120,8 @@ export function EditorGroupPanel({
             cwd={activeTab.cwd}
             rpc={gateway.rpc}
             onShellEvent={gateway.onShellEvent}
+            theme={theme}
+            palette={palette}
           />
         );
       case 'chat': {
