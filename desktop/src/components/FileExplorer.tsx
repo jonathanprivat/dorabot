@@ -6,10 +6,18 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import {
-  Folder, File, ChevronRight, ChevronDown, FolderPlus, Pencil, Trash2,
+  Folder, File, ChevronRight, ChevronDown, FolderPlus, FilePlus, Pencil, Trash2,
   GitBranch, Plus, Minus, FileEdit, RefreshCw, ArrowDownToLine, ArrowUpToLine,
-  Check, ChevronUp, Undo2, RotateCcw,
+  Check, ChevronUp, Undo2, RotateCcw, X,
 } from 'lucide-react';
+
+// Inline input for new file/folder/rename (replaces window.prompt which doesn't work in Electron)
+type InlineInputState = {
+  parentPath: string;
+  type: 'file' | 'folder' | 'rename';
+  defaultValue?: string;
+  originalPath?: string; // for rename
+} | null;
 
 type FileEntry = {
   name: string;
@@ -241,8 +249,11 @@ function GitPanel({ rpc, gitState, onFileClick, onOpenDiff, onRefresh }: {
     onRefresh();
   };
 
+  const [pendingDiscard, setPendingDiscard] = useState<string | null>(null);
+
   const handleDiscard = async (filePath: string) => {
-    if (!confirm(`Discard changes to ${filePath}?`)) return;
+    if (pendingDiscard !== filePath) { setPendingDiscard(filePath); return; }
+    setPendingDiscard(null);
     try {
       await rpc('git.discardFile', { path: gitState.root, file: filePath });
       onRefresh();
@@ -762,6 +773,8 @@ export function FileExplorer({ rpc, connected, onFileClick, onOpenDiff, onFileCh
   const [selectedPath, setSelectedPath] = useState<string | null>(initialSelectedPath ?? null);
 
   const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
+  const [inlineInput, setInlineInput] = useState<InlineInputState>(null);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
   const [gitState, setGitState] = useState<GitState | null>(null);
   const gitPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -864,46 +877,61 @@ export function FileExplorer({ rpc, connected, onFileClick, onOpenDiff, onFileCh
     });
   }, [dirs, loadDir]);
 
-  const createFolder = useCallback(async () => {
-    const folderName = prompt('Enter folder name:');
-    if (!folderName) return;
-    const newPath = viewRoot + '/' + folderName;
-    try {
-      await rpc('fs.mkdir', { path: newPath });
-      loadDir(viewRoot);
-    } catch (err) {
-      alert('Failed to create folder: ' + (err instanceof Error ? err.message : String(err)));
-    }
-  }, [viewRoot, rpc, loadDir]);
+  const createFolder = useCallback(() => {
+    setInlineInput({ parentPath: viewRoot, type: 'folder' });
+  }, [viewRoot]);
 
-  const deleteItem = useCallback(async (path: string, e: React.MouseEvent) => {
+  const createFile = useCallback(() => {
+    setInlineInput({ parentPath: viewRoot, type: 'file' });
+  }, [viewRoot]);
+
+  const submitInlineInput = useCallback(async (name: string) => {
+    if (!inlineInput || !name.trim()) { setInlineInput(null); return; }
+    const trimmed = name.trim();
+    try {
+      if (inlineInput.type === 'rename' && inlineInput.originalPath) {
+        const parentPath = inlineInput.originalPath.substring(0, inlineInput.originalPath.lastIndexOf('/'));
+        const newPath = parentPath + '/' + trimmed;
+        await rpc('fs.rename', { oldPath: inlineInput.originalPath, newPath });
+        loadDir(parentPath);
+        if (selectedPath === inlineInput.originalPath) setSelectedPath(newPath);
+      } else if (inlineInput.type === 'folder') {
+        await rpc('fs.mkdir', { path: inlineInput.parentPath + '/' + trimmed });
+        loadDir(inlineInput.parentPath);
+      } else {
+        await rpc('fs.write', { path: inlineInput.parentPath + '/' + trimmed, content: '' });
+        loadDir(inlineInput.parentPath);
+      }
+    } catch (err) {
+      console.error('File operation failed:', err);
+    }
+    setInlineInput(null);
+  }, [inlineInput, rpc, loadDir, selectedPath]);
+
+  const deleteItem = useCallback((path: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!confirm(`Delete ${path}?`)) return;
-    try {
-      await rpc('fs.delete', { path });
-      const parentPath = path.substring(0, path.lastIndexOf('/'));
-      loadDir(parentPath);
-      if (selectedPath === path) setSelectedPath(null);
-    } catch (err) {
-      alert('Failed to delete: ' + (err instanceof Error ? err.message : String(err)));
-    }
-  }, [rpc, loadDir, selectedPath]);
+    setConfirmDelete(path);
+  }, []);
 
-  const renameItem = useCallback(async (oldPath: string, e: React.MouseEvent) => {
+  const confirmDeleteItem = useCallback(async () => {
+    if (!confirmDelete) return;
+    try {
+      await rpc('fs.delete', { path: confirmDelete });
+      const parentPath = confirmDelete.substring(0, confirmDelete.lastIndexOf('/'));
+      loadDir(parentPath);
+      if (selectedPath === confirmDelete) setSelectedPath(null);
+    } catch (err) {
+      console.error('Failed to delete:', err);
+    }
+    setConfirmDelete(null);
+  }, [confirmDelete, rpc, loadDir, selectedPath]);
+
+  const renameItem = useCallback((oldPath: string, e: React.MouseEvent) => {
     e.stopPropagation();
     const oldName = oldPath.substring(oldPath.lastIndexOf('/') + 1);
-    const newName = prompt('Enter new name:', oldName);
-    if (!newName || newName === oldName) return;
     const parentPath = oldPath.substring(0, oldPath.lastIndexOf('/'));
-    const newPath = parentPath + '/' + newName;
-    try {
-      await rpc('fs.rename', { oldPath, newPath });
-      loadDir(parentPath);
-      if (selectedPath === oldPath) setSelectedPath(newPath);
-    } catch (err) {
-      alert('Failed to rename: ' + (err instanceof Error ? err.message : String(err)));
-    }
-  }, [rpc, loadDir, selectedPath]);
+    setInlineInput({ parentPath, type: 'rename', defaultValue: oldName, originalPath: oldPath });
+  }, []);
 
   const handleFileClick = useCallback((path: string) => {
     setSelectedPath(path);
@@ -1074,29 +1102,15 @@ export function FileExplorer({ rpc, connected, onFileClick, onOpenDiff, onFileCh
     setContextMenu(null);
   }, [rpc]);
 
-  const ctxNewFile = useCallback(async (folder: string) => {
+  const ctxNewFile = useCallback((folder: string) => {
     setContextMenu(null);
-    const name = prompt('Enter file name:');
-    if (!name) return;
-    try {
-      await rpc('fs.write', { path: folder + '/' + name, content: '' });
-      loadDir(folder);
-    } catch (err) {
-      alert('Failed to create file: ' + (err instanceof Error ? err.message : String(err)));
-    }
-  }, [rpc, loadDir]);
+    setInlineInput({ parentPath: folder, type: 'file' });
+  }, []);
 
-  const ctxNewFolder = useCallback(async (folder: string) => {
+  const ctxNewFolder = useCallback((folder: string) => {
     setContextMenu(null);
-    const name = prompt('Enter folder name:');
-    if (!name) return;
-    try {
-      await rpc('fs.mkdir', { path: folder + '/' + name });
-      loadDir(folder);
-    } catch (err) {
-      alert('Failed to create folder: ' + (err instanceof Error ? err.message : String(err)));
-    }
-  }, [rpc, loadDir]);
+    setInlineInput({ parentPath: folder, type: 'folder' });
+  }, []);
 
   // ── Git mode ────────────────────────────────────────────────────
   if (mode === 'git') {
@@ -1207,6 +1221,14 @@ export function FileExplorer({ rpc, connected, onFileClick, onOpenDiff, onFileCh
         <span className="text-xs font-semibold">files</span>
         <Tooltip>
           <TooltipTrigger asChild>
+            <Button variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={createFile}>
+              <FilePlus className="w-3 h-3" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" className="text-[10px]">New File</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
             <Button variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={createFolder}>
               <FolderPlus className="w-3 h-3" />
             </Button>
@@ -1237,8 +1259,46 @@ export function FileExplorer({ rpc, connected, onFileClick, onOpenDiff, onFileCh
           onContextMenu={handleBlankAreaContextMenu}
         >
           {viewRoot ? renderEntries(viewRoot, 0) : <div className="text-[11px] text-muted-foreground p-3">loading...</div>}
+          {/* Inline input for new file/folder/rename */}
+          {inlineInput && (
+            <div className="flex items-center gap-1.5 py-0.5 px-1 text-[11px]" style={{ paddingLeft: 12 }}>
+              {inlineInput.type === 'folder' ? <Folder className="w-3 h-3 shrink-0 text-primary" /> :
+               inlineInput.type === 'file' ? <File className="w-3 h-3 shrink-0" /> :
+               <Pencil className="w-3 h-3 shrink-0 text-muted-foreground" />}
+              <input
+                autoFocus
+                className="flex-1 bg-transparent border border-primary/50 rounded px-1 py-0 text-[11px] outline-none focus:border-primary min-w-0"
+                defaultValue={inlineInput.defaultValue || ''}
+                placeholder={inlineInput.type === 'rename' ? 'New name...' : inlineInput.type === 'folder' ? 'Folder name...' : 'File name...'}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') submitInlineInput((e.target as HTMLInputElement).value);
+                  if (e.key === 'Escape') setInlineInput(null);
+                }}
+                onBlur={(e) => {
+                  const val = e.target.value.trim();
+                  if (val && val !== (inlineInput.defaultValue || '')) submitInlineInput(val);
+                  else setInlineInput(null);
+                }}
+              />
+            </div>
+          )}
         </div>
       </ScrollArea>
+
+      {/* Delete confirmation */}
+      {confirmDelete && createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setConfirmDelete(null)}>
+          <div className="bg-popover border rounded-lg shadow-lg p-4 max-w-sm" onClick={e => e.stopPropagation()}>
+            <p className="text-sm mb-1">Delete this item?</p>
+            <p className="text-xs text-muted-foreground mb-3 break-all">{confirmDelete.substring(confirmDelete.lastIndexOf('/') + 1)}</p>
+            <div className="flex gap-2 justify-end">
+              <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setConfirmDelete(null)}>Cancel</Button>
+              <Button variant="destructive" size="sm" className="h-7 text-xs" onClick={confirmDeleteItem}>Delete</Button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
 
       {/* Context menu portal */}
       {contextMenu && createPortal(
