@@ -1,24 +1,23 @@
 import { useState, useCallback } from 'react';
 import type { Palette } from '../lib/palettes';
-import { isDarkPalette, getFamily, getPairedPalette } from '../lib/palettes';
+import { PALETTES, isDarkPalette, getFamily, getPairedPalette } from '../lib/palettes';
 
 export type Theme = 'light' | 'dark';
 
-function applyPalette(palette: Palette, glass: boolean) {
+const VALID_PALETTES = new Set<string>(PALETTES.map(p => p.id));
+
+function applyToDOM(palette: Palette, glass: boolean) {
   const el = document.documentElement;
   const isDark = isDarkPalette(palette);
 
-  // Set palette attribute (CSS selectors key off this)
   el.setAttribute('data-palette', palette);
 
-  // Set dark class for Tailwind
   if (isDark) {
     el.classList.add('dark');
   } else {
     el.classList.remove('dark');
   }
 
-  // Glass mode
   if (glass) {
     el.setAttribute('data-glass', 'true');
   } else {
@@ -30,9 +29,10 @@ function applyPalette(palette: Palette, glass: boolean) {
 }
 
 function initPalette(): Palette {
-  const stored = localStorage.getItem('palette') as Palette | null;
-  if (stored) return stored;
-  // Migrate from old theme-only system
+  const stored = localStorage.getItem('palette');
+  if (stored && VALID_PALETTES.has(stored)) return stored as Palette;
+  // Invalid or missing: clean up and fall back
+  localStorage.removeItem('palette');
   return document.documentElement.classList.contains('dark') ? 'default-dark' : 'default-light';
 }
 
@@ -44,8 +44,11 @@ export function useTheme() {
 
   const setPalette = useCallback((p: Palette) => {
     setPaletteState(p);
-    const g = localStorage.getItem('glass') === 'true';
-    applyPalette(p, g);
+    // Use functional update pattern to get current glass state
+    setGlassState(currentGlass => {
+      applyToDOM(p, currentGlass);
+      return currentGlass;
+    });
   }, []);
 
   const setGlass = useCallback((g: boolean) => {
@@ -63,7 +66,6 @@ export function useTheme() {
     setPalette(other);
   }, [palette, setPalette]);
 
-  // Backward compat for components that call setTheme('dark'|'light')
   const setTheme = useCallback((t: Theme) => {
     const family = getFamily(palette);
     if (family === 'default') {

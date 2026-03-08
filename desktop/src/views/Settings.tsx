@@ -21,7 +21,7 @@ type Props = {
 
 export function SettingsView({ gateway }: Props) {
   const [settingsTab, setSettingsTab] = useState<'config' | 'tools' | 'status'>('config');
-  const { theme, palette, glass, setTheme, setPalette, setGlass } = useTheme();
+  const { palette, glass, setPalette, setGlass } = useTheme();
   const cfg = gateway.configData as Record<string, any> | null;
   const disabled = gateway.connectionState !== 'connected' || !cfg;
 
@@ -80,10 +80,13 @@ export function SettingsView({ gateway }: Props) {
               </div>
 
               {/* color grid */}
-              <div className="grid grid-cols-3 gap-2 mb-4">
+              <div className="grid grid-cols-3 gap-2 mb-4" role="radiogroup" aria-label="Color palette">
                 {PALETTES.map(p => (
                   <button
                     key={p.id}
+                    role="radio"
+                    aria-checked={palette === p.id}
+                    aria-label={p.label}
                     onClick={() => setPalette(p.id)}
                     className={`relative rounded-lg overflow-hidden border-2 transition-all ${
                       palette === p.id

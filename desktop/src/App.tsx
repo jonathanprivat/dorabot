@@ -22,8 +22,9 @@ import {
   MessageSquare, Radio, Zap, Brain, Settings2,
   Sparkles, LayoutGrid, Loader2, Star,
   Sun, Moon, Clock, FileSearch, Plug, Folder, FolderOpen, X,
-  ShieldAlert, CalendarCheck, Target, FlaskConical, KeyRound, GitBranch, TerminalSquare
+  ShieldAlert, CalendarCheck, Target, FlaskConical, KeyRound, GitBranch, TerminalSquare, Check, Palette
 } from 'lucide-react';
+import { PALETTES } from './lib/palettes';
 
 type SessionFilter = 'all' | 'desktop' | 'telegram' | 'whatsapp';
 type UpdateState = {
@@ -81,6 +82,93 @@ const SECONDARY_NAV_ITEMS: { id: TabType; label: string; icon: React.ReactNode }
 
 const ALL_NAV_ITEMS = [...PRIMARY_NAV_ITEMS, ...SECONDARY_NAV_ITEMS];
 
+function PalettePicker({ palette, glass, onPalette, onGlass }: {
+  palette: string;
+  glass: boolean;
+  onPalette: (p: any) => void;
+  onGlass: (g: boolean) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative" style={{ WebkitAppRegion: 'no-drag' } as any}>
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="ml-1 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary/50 transition-colors"
+        title="Color palette"
+      >
+        <Palette className="w-4 h-4" />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 z-50 w-56 rounded-lg border border-border bg-popover p-2 shadow-lg">
+          <div className="grid grid-cols-3 gap-1.5 mb-2">
+            {PALETTES.map(p => (
+              <button
+                key={p.id}
+                onClick={() => { onPalette(p.id); }}
+                className={cn(
+                  'relative rounded-md overflow-hidden border transition-all',
+                  palette === p.id
+                    ? 'border-primary ring-1 ring-primary/30'
+                    : 'border-transparent hover:border-border',
+                )}
+              >
+                <div className="h-8 flex flex-col" style={{ background: p.preview.bg }}>
+                  <div className="flex-1 flex items-center px-1.5 gap-0.5">
+                    <div className="w-4 h-0.5 rounded-full" style={{ background: p.preview.fg, opacity: 0.5 }} />
+                    <div className="w-3 h-0.5 rounded-full" style={{ background: p.preview.fg, opacity: 0.25 }} />
+                  </div>
+                  <div className="h-1 flex">
+                    <div className="flex-1" style={{ background: p.preview.accent }} />
+                    <div className="flex-1" style={{ background: p.preview.accent2 }} />
+                  </div>
+                </div>
+                <div className="px-1.5 py-0.5" style={{ background: p.preview.bg }}>
+                  <span className="text-[8px] font-medium leading-none" style={{ color: p.preview.fg }}>{p.label}</span>
+                </div>
+                {palette === p.id && (
+                  <div className="absolute top-0.5 right-0.5 w-3 h-3 rounded-full bg-primary flex items-center justify-center">
+                    <Check className="w-2 h-2 text-primary-foreground" />
+                  </div>
+                )}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center justify-between px-1 py-1 border-t border-border/50">
+            <div className="flex items-center gap-1.5">
+              <Sparkles className="w-3 h-3 text-muted-foreground" />
+              <span className="text-[10px] text-muted-foreground">glass</span>
+            </div>
+            <button
+              onClick={() => onGlass(!glass)}
+              className={cn(
+                'w-7 h-4 rounded-full transition-colors relative',
+                glass ? 'bg-primary' : 'bg-secondary',
+              )}
+            >
+              <div className={cn(
+                'absolute top-0.5 w-3 h-3 rounded-full bg-white shadow-sm transition-transform',
+                glass ? 'translate-x-3.5' : 'translate-x-0.5',
+              )} />
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
   const [showFiles, setShowFiles] = useState(() => localStorage.getItem('dorabot:showFiles') === 'true');
   const [sidebarView, setSidebarView] = useState<'files' | 'git'>(() => (localStorage.getItem('dorabot:sidebarView') as 'files' | 'git') || 'files');
@@ -98,7 +186,7 @@ export default function App() {
   const tabState = useTabs(gw, layout);
   const [starCount, setStarCount] = useState<number | null>(null);
   const [draggingTab, setDraggingTab] = useState<Tab | null>(null);
-  const { theme, toggle: toggleTheme } = useTheme();
+  const { theme, palette, glass, toggle: toggleTheme, setPalette, setGlass } = useTheme();
   const [updateState, setUpdateState] = useState<UpdateState>({ status: 'idle' });
   const notify = useCallback((body: string) => {
     const api = (window as any).electronAPI;
@@ -775,6 +863,7 @@ export default function App() {
         >
           {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
         </button>
+        <PalettePicker palette={palette} glass={glass} onPalette={setPalette} onGlass={setGlass} />
         <button
           onClick={() => setShowFiles(v => !v)}
           className="ml-1 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary/50 transition-colors"
