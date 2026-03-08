@@ -11,20 +11,19 @@ type Props = {
   cwd?: string;
   rpc: (method: string, params?: Record<string, unknown>) => Promise<unknown>;
   onShellEvent?: (listener: (data: { shellId: string; type: string; data?: string }) => void) => () => void;
-  theme?: 'dark' | 'light';
   palette?: Palette;
 };
 
-function getTerminalTheme(palette?: Palette, theme?: 'dark' | 'light') {
+function getTerminalTheme(palette?: Palette) {
   if (palette) {
     return getPalette(palette).terminal;
   }
-  // Fallback for when no palette is passed
-  const p = (localStorage.getItem('palette') as Palette) || (theme === 'dark' ? 'default-dark' : 'default-light');
+  const storedPalette = localStorage.getItem('palette') as Palette | null;
+  const p = storedPalette || (localStorage.getItem('theme') === 'light' ? 'default-light' : 'default-dark');
   return getPalette(p).terminal;
 }
 
-export function TerminalView({ shellId, cwd, rpc, onShellEvent, theme = 'dark', palette }: Props) {
+export function TerminalView({ shellId, cwd, rpc, onShellEvent, palette }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -41,7 +40,7 @@ export function TerminalView({ shellId, cwd, rpc, onShellEvent, theme = 'dark', 
       lineHeight: 1.4,
       cursorBlink: true,
       cursorStyle: 'bar',
-      theme: getTerminalTheme(palette, theme),
+      theme: getTerminalTheme(palette),
       allowProposedApi: true,
       scrollback: 5000,
       convertEol: true,
@@ -81,9 +80,9 @@ export function TerminalView({ shellId, cwd, rpc, onShellEvent, theme = 'dark', 
   // Update theme
   useEffect(() => {
     if (terminalRef.current) {
-      terminalRef.current.options.theme = getTerminalTheme(palette, theme);
+      terminalRef.current.options.theme = getTerminalTheme(palette);
     }
-  }, [theme, palette]);
+  }, [palette]);
 
   // Spawn shell and wire up I/O
   useEffect(() => {
@@ -137,7 +136,7 @@ export function TerminalView({ shellId, cwd, rpc, onShellEvent, theme = 'dark', 
   }, [shellId, onShellEvent]);
 
   return (
-    <div className="flex flex-col h-full min-h-0" style={{ background: getTerminalTheme(palette, theme).background }}>
+    <div className="flex flex-col h-full min-h-0" style={{ background: getTerminalTheme(palette).background }}>
       <div
         ref={containerRef}
         className="flex-1 min-h-0 p-1"

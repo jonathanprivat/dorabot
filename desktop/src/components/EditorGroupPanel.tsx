@@ -84,7 +84,7 @@ export function EditorGroupPanel({
   onSplitRight,
   onSplitDown,
 }: Props) {
-  const { theme, palette } = useTheme();
+  const { palette } = useTheme();
   const groupTabs = group.tabIds
     .map(id => tabs.find(t => t.id === id))
     .filter(Boolean) as Tab[];
@@ -120,7 +120,6 @@ export function EditorGroupPanel({
             cwd={activeTab.cwd}
             rpc={gateway.rpc}
             onShellEvent={gateway.onShellEvent}
-            theme={theme}
             palette={palette}
           />
         );

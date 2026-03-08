@@ -21,7 +21,7 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/componen
 import {
   MessageSquare, Radio, Zap, Brain, Settings2,
   Sparkles, LayoutGrid, Loader2, Star,
-  Sun, Moon, Clock, FileSearch, Plug, Folder, FolderOpen, X,
+  Clock, FileSearch, Plug, Folder, FolderOpen, X,
   ShieldAlert, CalendarCheck, Target, FlaskConical, KeyRound, GitBranch, TerminalSquare, Check, Palette
 } from 'lucide-react';
 import { PALETTES } from './lib/palettes';
@@ -186,7 +186,7 @@ export default function App() {
   const tabState = useTabs(gw, layout);
   const [starCount, setStarCount] = useState<number | null>(null);
   const [draggingTab, setDraggingTab] = useState<Tab | null>(null);
-  const { theme, palette, glass, toggle: toggleTheme, setPalette, setGlass } = useTheme();
+  const { palette, glass, setPalette, setGlass } = useTheme();
   const [updateState, setUpdateState] = useState<UpdateState>({ status: 'idle' });
   const notify = useCallback((body: string) => {
     const api = (window as any).electronAPI;
@@ -855,14 +855,6 @@ export default function App() {
             </span>
           )}
         </a>
-        <button
-          onClick={toggleTheme}
-          className="ml-2 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary/50 transition-colors"
-          style={{ WebkitAppRegion: 'no-drag' } as any}
-          title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-        >
-          {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-        </button>
         <PalettePicker palette={palette} glass={glass} onPalette={setPalette} onGlass={setGlass} />
         <button
           onClick={() => setShowFiles(v => !v)}

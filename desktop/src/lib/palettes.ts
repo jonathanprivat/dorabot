@@ -1,10 +1,12 @@
 export type Palette =
-  | 'default-dark'
   | 'default-light'
-  | 'catppuccin-mocha'
-  | 'catppuccin-latte'
-  | 'rose-pine'
-  | 'rose-pine-dawn';
+  | 'default-dark'
+  | 'mocha-light'
+  | 'mocha-dark'
+  | 'sage-light'
+  | 'sage-dark'
+  | 'ocean-light'
+  | 'ocean-dark';
 
 export type PaletteInfo = {
   id: Palette;
@@ -17,11 +19,19 @@ export type PaletteInfo = {
 
 const PAIRS: Record<string, [Palette, Palette]> = {
   default: ['default-light', 'default-dark'],
-  catppuccin: ['catppuccin-latte', 'catppuccin-mocha'],
-  'rose-pine': ['rose-pine-dawn', 'rose-pine'],
+  mocha: ['mocha-light', 'mocha-dark'],
+  sage: ['sage-light', 'sage-dark'],
+  ocean: ['ocean-light', 'ocean-dark'],
 };
 
-const DARK_SET = new Set<Palette>(['default-dark', 'catppuccin-mocha', 'rose-pine']);
+const DARK_SET = new Set<Palette>(['default-dark', 'mocha-dark', 'sage-dark', 'ocean-dark']);
+
+export const LEGACY_PALETTE_MAP: Record<string, Palette> = {
+  'catppuccin-latte': 'mocha-light',
+  'catppuccin-mocha': 'mocha-dark',
+  'rose-pine-dawn': 'ocean-light',
+  'rose-pine': 'ocean-dark',
+};
 
 export function isDarkPalette(p: Palette): boolean {
   return DARK_SET.has(p);
@@ -29,13 +39,13 @@ export function isDarkPalette(p: Palette): boolean {
 
 export function getFamily(p: Palette): string {
   if (p.startsWith('default')) return 'default';
-  if (p.startsWith('catppuccin')) return 'catppuccin';
-  return 'rose-pine';
+  if (p.startsWith('mocha')) return 'mocha';
+  if (p.startsWith('sage')) return 'sage';
+  return 'ocean';
 }
 
 export function getPairedPalette(p: Palette): Palette {
-  const family = getFamily(p);
-  const pair = PAIRS[family];
+  const pair = PAIRS[getFamily(p)];
   return pair[0] === p ? pair[1] : pair[0];
 }
 
@@ -79,79 +89,117 @@ export const PALETTES: PaletteInfo[] = [
     },
   },
   {
-    id: 'catppuccin-mocha',
-    label: 'Mocha',
-    family: 'catppuccin',
-    isDark: true,
-    preview: { bg: '#1e1e2e', fg: '#cdd6f4', accent: '#cba6f7', accent2: '#a6e3a1' },
-    terminal: {
-      background: '#1e1e2e',
-      foreground: '#cdd6f4',
-      cursor: '#f5e0dc',
-      cursorAccent: '#1e1e2e',
-      selectionBackground: '#45475a',
-      selectionForeground: '#cdd6f4',
-      black: '#45475a', red: '#f38ba8', green: '#a6e3a1', yellow: '#f9e2af',
-      blue: '#89b4fa', magenta: '#cba6f7', cyan: '#94e2d5', white: '#bac2de',
-      brightBlack: '#585b70', brightRed: '#f38ba8', brightGreen: '#a6e3a1', brightYellow: '#f9e2af',
-      brightBlue: '#89b4fa', brightMagenta: '#cba6f7', brightCyan: '#94e2d5', brightWhite: '#a6adc8',
-    },
-  },
-  {
-    id: 'catppuccin-latte',
-    label: 'Latte',
-    family: 'catppuccin',
+    id: 'mocha-light',
+    label: 'Mocha Light',
+    family: 'mocha',
     isDark: false,
-    preview: { bg: '#eff1f5', fg: '#4c4f69', accent: '#8839ef', accent2: '#40a02b' },
+    preview: { bg: '#f5efe9', fg: '#4a3a2f', accent: '#9f6e43', accent2: '#7f9a6f' },
     terminal: {
-      background: '#eff1f5',
-      foreground: '#4c4f69',
-      cursor: '#dc8a78',
-      cursorAccent: '#eff1f5',
-      selectionBackground: '#acb0be',
-      selectionForeground: '#4c4f69',
-      black: '#5c5f77', red: '#d20f39', green: '#40a02b', yellow: '#df8e1d',
-      blue: '#1e66f5', magenta: '#8839ef', cyan: '#179299', white: '#acb0be',
-      brightBlack: '#6c6f85', brightRed: '#d20f39', brightGreen: '#40a02b', brightYellow: '#df8e1d',
-      brightBlue: '#1e66f5', brightMagenta: '#8839ef', brightCyan: '#179299', brightWhite: '#bcc0cc',
+      background: '#f5efe9',
+      foreground: '#4a3a2f',
+      cursor: '#8c6545',
+      cursorAccent: '#f5efe9',
+      selectionBackground: '#ddd1c5',
+      selectionForeground: '#3b2d23',
+      black: '#3f332b', red: '#b66a56', green: '#6f8f5c', yellow: '#b2874c',
+      blue: '#6c8da6', magenta: '#8f7a6e', cyan: '#5d8f88', white: '#ece2d7',
+      brightBlack: '#7a6a5f', brightRed: '#c8826f', brightGreen: '#87a473', brightYellow: '#c89c60',
+      brightBlue: '#87a4bb', brightMagenta: '#a18e82', brightCyan: '#76a6a0', brightWhite: '#ffffff',
     },
   },
   {
-    id: 'rose-pine',
-    label: 'Rosé Pine',
-    family: 'rose-pine',
+    id: 'mocha-dark',
+    label: 'Mocha Dark',
+    family: 'mocha',
     isDark: true,
-    preview: { bg: '#191724', fg: '#e0def4', accent: '#c4a7e7', accent2: '#9ccfd8' },
+    preview: { bg: '#19120f', fg: '#efe3d4', accent: '#cda174', accent2: '#95ab8f' },
     terminal: {
-      background: '#191724',
-      foreground: '#e0def4',
-      cursor: '#524f67',
-      cursorAccent: '#e0def4',
-      selectionBackground: '#2a283e',
-      selectionForeground: '#e0def4',
-      black: '#26233a', red: '#eb6f92', green: '#9ccfd8', yellow: '#f6c177',
-      blue: '#31748f', magenta: '#c4a7e7', cyan: '#ebbcba', white: '#e0def4',
-      brightBlack: '#6e6a86', brightRed: '#eb6f92', brightGreen: '#9ccfd8', brightYellow: '#f6c177',
-      brightBlue: '#31748f', brightMagenta: '#c4a7e7', brightCyan: '#ebbcba', brightWhite: '#e0def4',
+      background: '#19120f',
+      foreground: '#efe3d4',
+      cursor: '#d7b38e',
+      cursorAccent: '#19120f',
+      selectionBackground: '#3b2f27',
+      selectionForeground: '#f7efe5',
+      black: '#1b1613', red: '#c9856a', green: '#9cb489', yellow: '#d7b372',
+      blue: '#9eb9c6', magenta: '#b9a08f', cyan: '#8fb8ad', white: '#ddcbb8',
+      brightBlack: '#5b4b3f', brightRed: '#d79a82', brightGreen: '#afc49e', brightYellow: '#e4c58c',
+      brightBlue: '#b2c9d4', brightMagenta: '#c8b3a5', brightCyan: '#a3c8be', brightWhite: '#f7efe5',
     },
   },
   {
-    id: 'rose-pine-dawn',
-    label: 'Rosé Dawn',
-    family: 'rose-pine',
+    id: 'sage-light',
+    label: 'Sage Light',
+    family: 'sage',
     isDark: false,
-    preview: { bg: '#faf4ed', fg: '#575279', accent: '#907aa9', accent2: '#56949f' },
+    preview: { bg: '#eef4ee', fg: '#2f4034', accent: '#5d8f6b', accent2: '#7ea59b' },
     terminal: {
-      background: '#faf4ed',
-      foreground: '#575279',
-      cursor: '#cecacd',
-      cursorAccent: '#575279',
-      selectionBackground: '#dfdad9',
-      selectionForeground: '#575279',
-      black: '#f2e9e1', red: '#b4637a', green: '#56949f', yellow: '#ea9d34',
-      blue: '#286983', magenta: '#907aa9', cyan: '#d7827e', white: '#575279',
-      brightBlack: '#9893a5', brightRed: '#b4637a', brightGreen: '#56949f', brightYellow: '#ea9d34',
-      brightBlue: '#286983', brightMagenta: '#907aa9', brightCyan: '#d7827e', brightWhite: '#575279',
+      background: '#eef4ee',
+      foreground: '#2f4034',
+      cursor: '#5d8f6b',
+      cursorAccent: '#eef4ee',
+      selectionBackground: '#d4e1d4',
+      selectionForeground: '#243229',
+      black: '#2f4034', red: '#b4615d', green: '#5f8f6c', yellow: '#9d8f50',
+      blue: '#5f7da1', magenta: '#7f768d', cyan: '#4d8b87', white: '#e3ebe3',
+      brightBlack: '#60766a', brightRed: '#c57a75', brightGreen: '#78a183', brightYellow: '#b09f65',
+      brightBlue: '#7893b3', brightMagenta: '#948ba0', brightCyan: '#68a09b', brightWhite: '#ffffff',
+    },
+  },
+  {
+    id: 'sage-dark',
+    label: 'Sage Dark',
+    family: 'sage',
+    isDark: true,
+    preview: { bg: '#121916', fg: '#dce8dd', accent: '#7ea58a', accent2: '#6d97a4' },
+    terminal: {
+      background: '#121916',
+      foreground: '#dce8dd',
+      cursor: '#8cb29a',
+      cursorAccent: '#121916',
+      selectionBackground: '#27352e',
+      selectionForeground: '#e9f2ea',
+      black: '#141d19', red: '#bb7a73', green: '#7ea58a', yellow: '#b9a06d',
+      blue: '#7f98b0', magenta: '#9a8aa8', cyan: '#6fa6a2', white: '#cad8cb',
+      brightBlack: '#495a51', brightRed: '#cc8f89', brightGreen: '#94b89f', brightYellow: '#cbb684',
+      brightBlue: '#95abc1', brightMagenta: '#af9dba', brightCyan: '#83b9b5', brightWhite: '#e9f2ea',
+    },
+  },
+  {
+    id: 'ocean-light',
+    label: 'Ocean Light',
+    family: 'ocean',
+    isDark: false,
+    preview: { bg: '#eff3f8', fg: '#334458', accent: '#5c88b2', accent2: '#6fa0a2' },
+    terminal: {
+      background: '#eff3f8',
+      foreground: '#334458',
+      cursor: '#5c88b2',
+      cursorAccent: '#eff3f8',
+      selectionBackground: '#d3dee9',
+      selectionForeground: '#243445',
+      black: '#334458', red: '#c06b67', green: '#5c907f', yellow: '#b09256',
+      blue: '#5c88b2', magenta: '#7d7ea8', cyan: '#5a97a0', white: '#e5ecf4',
+      brightBlack: '#657a90', brightRed: '#d1817b', brightGreen: '#75a595', brightYellow: '#c2a96d',
+      brightBlue: '#76a0c8', brightMagenta: '#9596bd', brightCyan: '#74acb3', brightWhite: '#ffffff',
+    },
+  },
+  {
+    id: 'ocean-dark',
+    label: 'Ocean Dark',
+    family: 'ocean',
+    isDark: true,
+    preview: { bg: '#101722', fg: '#d8e3f0', accent: '#6f9cc8', accent2: '#73a7a9' },
+    terminal: {
+      background: '#101722',
+      foreground: '#d8e3f0',
+      cursor: '#83add5',
+      cursorAccent: '#101722',
+      selectionBackground: '#27364a',
+      selectionForeground: '#e7f0fb',
+      black: '#121a26', red: '#c97d76', green: '#6fa092', yellow: '#bc9f67',
+      blue: '#6f9cc8', magenta: '#8d8fc0', cyan: '#6faeb2', white: '#c4d3e6',
+      brightBlack: '#495b72', brightRed: '#da928a', brightGreen: '#86b5a6', brightYellow: '#ceb67f',
+      brightBlue: '#86b2dd', brightMagenta: '#a3a4d2', brightCyan: '#84c1c4', brightWhite: '#e7f0fb',
     },
   },
 ];

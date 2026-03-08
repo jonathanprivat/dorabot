@@ -1,10 +1,16 @@
 import { useState, useCallback } from 'react';
 import type { Palette } from '../lib/palettes';
-import { PALETTES, isDarkPalette, getFamily, getPairedPalette } from '../lib/palettes';
+import { LEGACY_PALETTE_MAP, PALETTES, getFamily, getPairedPalette, isDarkPalette } from '../lib/palettes';
 
 export type Theme = 'light' | 'dark';
 
 const VALID_PALETTES = new Set<string>(PALETTES.map(p => p.id));
+
+function normalizePalette(raw: string | null): Palette | null {
+  if (!raw) return null;
+  if (VALID_PALETTES.has(raw)) return raw as Palette;
+  return LEGACY_PALETTE_MAP[raw] || null;
+}
 
 function applyToDOM(palette: Palette, glass: boolean) {
   const el = document.documentElement;
@@ -29,11 +35,20 @@ function applyToDOM(palette: Palette, glass: boolean) {
 }
 
 function initPalette(): Palette {
-  const stored = localStorage.getItem('palette');
-  if (stored && VALID_PALETTES.has(stored)) return stored as Palette;
-  // Invalid or missing: clean up and fall back
+  const normalized = normalizePalette(localStorage.getItem('palette'));
+  if (normalized) {
+    localStorage.setItem('palette', normalized);
+    localStorage.setItem('theme', isDarkPalette(normalized) ? 'dark' : 'light');
+    return normalized;
+  }
+
   localStorage.removeItem('palette');
-  return document.documentElement.classList.contains('dark') ? 'default-dark' : 'default-light';
+  const savedTheme = localStorage.getItem('theme');
+  const prefersDark = savedTheme === 'dark'
+    || (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  const fallback: Palette = prefersDark ? 'default-dark' : 'default-light';
+  localStorage.setItem('theme', prefersDark ? 'dark' : 'light');
+  return fallback;
 }
 
 export function useTheme() {
@@ -44,7 +59,6 @@ export function useTheme() {
 
   const setPalette = useCallback((p: Palette) => {
     setPaletteState(p);
-    // Use functional update pattern to get current glass state
     setGlassState(currentGlass => {
       applyToDOM(p, currentGlass);
       return currentGlass;
@@ -62,18 +76,19 @@ export function useTheme() {
   }, []);
 
   const toggle = useCallback(() => {
-    const other = getPairedPalette(palette);
-    setPalette(other);
+    setPalette(getPairedPalette(palette));
   }, [palette, setPalette]);
 
   const setTheme = useCallback((t: Theme) => {
     const family = getFamily(palette);
     if (family === 'default') {
       setPalette(t === 'dark' ? 'default-dark' : 'default-light');
-    } else if (family === 'catppuccin') {
-      setPalette(t === 'dark' ? 'catppuccin-mocha' : 'catppuccin-latte');
+    } else if (family === 'mocha') {
+      setPalette(t === 'dark' ? 'mocha-dark' : 'mocha-light');
+    } else if (family === 'sage') {
+      setPalette(t === 'dark' ? 'sage-dark' : 'sage-light');
     } else {
-      setPalette(t === 'dark' ? 'rose-pine' : 'rose-pine-dawn');
+      setPalette(t === 'dark' ? 'ocean-dark' : 'ocean-light');
     }
   }, [palette, setPalette]);
 

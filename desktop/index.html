@@ -6,16 +6,41 @@
     <script>
       (function() {
         var palette = localStorage.getItem('palette');
-        var darkPalettes = ['default-dark', 'catppuccin-mocha', 'rose-pine'];
-        if (palette) {
-          document.documentElement.setAttribute('data-palette', palette);
-          if (darkPalettes.indexOf(palette) !== -1) document.documentElement.classList.add('dark');
-        } else if (localStorage.getItem('theme') === 'dark' || (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
-          document.documentElement.classList.add('dark');
-          document.documentElement.setAttribute('data-palette', 'default-dark');
-        } else {
-          document.documentElement.setAttribute('data-palette', 'default-light');
+        var legacyMap = {
+          'catppuccin-latte': 'mocha-light',
+          'catppuccin-mocha': 'mocha-dark',
+          'rose-pine-dawn': 'ocean-light',
+          'rose-pine': 'ocean-dark'
+        };
+        var validPalettes = [
+          'default-light',
+          'default-dark',
+          'mocha-light',
+          'mocha-dark',
+          'sage-light',
+          'sage-dark',
+          'ocean-light',
+          'ocean-dark'
+        ];
+        var darkPalettes = ['default-dark', 'mocha-dark', 'sage-dark', 'ocean-dark'];
+        var savedTheme = localStorage.getItem('theme');
+        var prefersDark = savedTheme === 'dark' || (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches);
+
+        if (palette && legacyMap[palette]) {
+          palette = legacyMap[palette];
         }
+        if (!palette || validPalettes.indexOf(palette) === -1) {
+          palette = prefersDark ? 'default-dark' : 'default-light';
+        }
+
+        if (darkPalettes.indexOf(palette) !== -1) {
+          document.documentElement.classList.add('dark');
+        } else {
+          document.documentElement.classList.remove('dark');
+        }
+        document.documentElement.setAttribute('data-palette', palette);
+        localStorage.setItem('palette', palette);
+        localStorage.setItem('theme', darkPalettes.indexOf(palette) !== -1 ? 'dark' : 'light');
         if (localStorage.getItem('glass') === 'true') document.documentElement.setAttribute('data-glass', 'true');
       })();
     </script>
