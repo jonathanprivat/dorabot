@@ -892,9 +892,12 @@ export function FileExplorer({ rpc, connected, onFileClick, onOpenDiff, onFileCh
         return next;
       });
     } catch (err) {
+      const msg = String(err);
+      // Suppress transient disconnection errors (bridge auto-reconnects)
+      const isDisconnect = msg.includes('connection_lost') || msg.includes('Connection closed') || msg.includes('Not connected') || msg.includes('ws_close');
       setDirs(prev => {
         const next = new Map(prev);
-        next.set(path, { entries: [], loading: false, error: String(err) });
+        next.set(path, { entries: prev.get(path)?.entries || [], loading: false, ...(isDisconnect ? {} : { error: msg }) });
         return next;
       });
     }

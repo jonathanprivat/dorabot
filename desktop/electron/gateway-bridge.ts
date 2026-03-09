@@ -127,7 +127,8 @@ export class GatewayBridge {
       if (this.ws !== ws) return;
       this.ws = null;
       this.stopHeartbeat();
-      const reasonStr = reason.toString().trim() || `ws_close_${code}`;
+      const rawReason = reason.toString().trim();
+      const reasonStr = rawReason || (code === 1005 || code === 1006 ? 'connection_lost' : `ws_close_${code}`);
       this.log(`WebSocket closed: code=${code} reason=${reasonStr}`);
       this.setState('disconnected', reasonStr);
       if (!this.manuallyClosed) this.scheduleReconnect(reasonStr);
