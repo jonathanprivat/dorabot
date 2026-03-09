@@ -14,6 +14,9 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Shield, Brain, Globe, Settings2, Box, Lock, FolderLock, X, Plus, Wrench, Activity, Sun, Check, Sparkles } from 'lucide-react';
 import { PALETTES } from '../lib/palettes';
 import type { Palette } from '../lib/palettes';
+import { CLAUDE_MODELS, DEFAULT_CLAUDE_MODEL, DEFAULT_CODEX_MODEL, codexModelsForAuth } from '@/lib/modelCatalog';
+import { useEditorPrefs } from '../hooks/useEditorPrefs';
+import { FileCode } from 'lucide-react';
 
 type Props = {
   gateway: ReturnType<typeof useGateway>;
@@ -22,6 +25,7 @@ type Props = {
 export function SettingsView({ gateway }: Props) {
   const [settingsTab, setSettingsTab] = useState<'config' | 'tools' | 'status'>('config');
   const { palette, glass, setPalette, setGlass } = useTheme();
+  const { prefs: editorPrefs, update: updateEditorPrefs } = useEditorPrefs();
   const cfg = gateway.configData as Record<string, any> | null;
   const disabled = gateway.connectionState !== 'connected' || !cfg;
 
@@ -246,6 +250,113 @@ export function SettingsView({ gateway }: Props) {
               </div>
 
               <div className="space-y-4">
+                {/* Autonomy */}
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-xs font-medium">Autonomy</div>
+                    <div className="text-[10px] text-muted-foreground">Supervised requires approval for sensitive actions</div>
+                  </div>
+                  <Select
+                    value={cfg?.autonomy || 'supervised'}
+                    onValueChange={v => set('autonomy', v)}
+                    disabled={disabled}
+                  >
+                    <SelectTrigger className="w-[140px] h-7 text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="supervised">Supervised</SelectItem>
+                      <SelectItem value="autonomous">Autonomous</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Reasoning Effort */}
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-xs font-medium">Reasoning Effort</div>
+                    <div className="text-[10px] text-muted-foreground">How much the model thinks before responding</div>
+                  </div>
+                  <Select
+                    value={cfg?.reasoningEffort || 'medium'}
+                    onValueChange={v => set('reasoningEffort', v === 'medium' ? null : v)}
+                    disabled={disabled}
+                  >
+                    <SelectTrigger className="w-[140px] h-7 text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="minimal">Minimal</SelectItem>
+                      <SelectItem value="low">Low</SelectItem>
+                      <SelectItem value="medium">Medium (default)</SelectItem>
+                      <SelectItem value="high">High</SelectItem>
+                      <SelectItem value="max">Max</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Max Budget */}
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-xs font-medium">Max Budget (USD)</div>
+                    <div className="text-[10px] text-muted-foreground">Spending limit per session</div>
+                  </div>
+                  <Input
+                    type="number"
+                    step="0.5"
+                    min="0"
+                    placeholder="unlimited"
+                    className="w-[140px] h-7 text-xs"
+                    value={cfg?.maxBudgetUsd ?? ''}
+                    onChange={e => {
+                      const v = e.target.value ? parseFloat(e.target.value) : null;
+                      set('maxBudgetUsd', v);
+                    }}
+                    disabled={disabled}
+                  />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* editor */}
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-center gap-2 mb-4">
+                <FileCode className="w-4 h-4 text-primary" />
+                <span className="text-xs font-semibold">Editor</span>
+              </div>
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="text-xs font-medium">Font Size</div>
+                  <Select value={String(editorPrefs.fontSize)} onValueChange={v => updateEditorPrefs({ fontSize: Number(v) })}>
+                    <SelectTrigger className="w-[140px] h-7 text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {[11, 12, 13, 14, 15, 16, 18, 20].map(s => (
+                        <SelectItem key={s} value={String(s)}>{s}px</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-center justify-between">
+                  <div className="text-xs font-medium">Tab Size</div>
+                  <Select value={String(editorPrefs.tabSize)} onValueChange={v => updateEditorPrefs({ tabSize: Number(v) })}>
+                    <SelectTrigger className="w-[140px] h-7 text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {[2, 4, 8].map(s => (
+                        <SelectItem key={s} value={String(s)}>{s} spaces</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-center justify-between">
+                  <div className="text-xs font-medium">Word Wrap</div>
+                  <Switch checked={editorPrefs.wordWrap === 'on'} onCheckedChange={v => updateEditorPrefs({ wordWrap: v ? 'on' : 'off' })} />
+                </div>
+                <div className="flex items-center justify-between">
+                  <div className="text-xs font-medium">Minimap</div>
+                  <Switch checked={editorPrefs.minimap} onCheckedChange={v => updateEditorPrefs({ minimap: v })} />
+                </div>
+                <div className="flex items-center justify-between">
+                  <div className="text-xs font-medium">Line Numbers</div>
+                  <Switch checked={editorPrefs.lineNumbers === 'on'} onCheckedChange={v => updateEditorPrefs({ lineNumbers: v ? 'on' : 'off' })} />
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -301,23 +412,6 @@ export function SettingsView({ gateway }: Props) {
   );
 }
 
-const CLAUDE_MODELS = [
-  { value: 'claude-opus-4-6', label: 'opus' },
-  { value: 'claude-sonnet-4-5-20250929', label: 'sonnet' },
-  { value: 'claude-haiku-4-5-20251001', label: 'haiku' },
-];
-
-const CODEX_MODELS = [
-  { value: 'gpt-5.4', label: 'gpt-5.4' },
-  { value: 'gpt-5.3-codex', label: 'gpt-5.3-codex' },
-  { value: 'gpt-5.2-codex', label: 'gpt-5.2-codex' },
-  { value: 'gpt-5.1-codex-mini', label: 'gpt-5.1-codex-mini' },
-  { value: 'gpt-5.1-codex-max', label: 'gpt-5.1-codex-max' },
-  { value: 'gpt-5.2', label: 'gpt-5.2' },
-  { value: 'gpt-5.1', label: 'gpt-5.1' },
-  { value: 'gpt-5', label: 'gpt-5' },
-];
-
 type ProviderAuthView = {
   authenticated: boolean;
   method?: string;
@@ -338,7 +432,7 @@ function AnthropicCard({ gateway, disabled }: { gateway: ReturnType<typeof useGa
   const [showAuth, setShowAuth] = useState(false);
   const [authStatus, setAuthStatus] = useState<ProviderAuthView | null>(null);
   const cfg = gateway.configData as Record<string, any> | null;
-  const currentModel = gateway.model || cfg?.model || 'claude-sonnet-4-5-20250929';
+  const currentModel = gateway.model || cfg?.model || DEFAULT_CLAUDE_MODEL;
   const permissionMode = cfg?.permissionMode || 'default';
 
   // Query auth independently
@@ -425,7 +519,7 @@ function AnthropicCard({ gateway, disabled }: { gateway: ReturnType<typeof useGa
           {/* model selector */}
           <SettingRow label="model" description="default model for new chats">
             <Select value={currentModel} onValueChange={gateway.changeModel} disabled={disabled}>
-              <SelectTrigger className="h-7 w-40 text-[11px]">
+              <SelectTrigger className="h-7 w-48 text-[11px]">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -466,7 +560,7 @@ function OpenAICard({ gateway, disabled }: { gateway: ReturnType<typeof useGatew
   const [showAuth, setShowAuth] = useState(false);
   const [authStatus, setAuthStatus] = useState<ProviderAuthView | null>(null);
   const cfg = gateway.configData as Record<string, any> | null;
-  const codexModel = cfg?.provider?.codex?.model || 'gpt-5.4';
+  const codexModel = cfg?.provider?.codex?.model || DEFAULT_CODEX_MODEL;
   const reasoningEffort = cfg?.reasoningEffort as string | null;
   const sandboxMode = cfg?.provider?.codex?.sandboxMode || 'danger-full-access';
   const approvalPolicy = cfg?.provider?.codex?.approvalPolicy || 'never';
@@ -489,6 +583,7 @@ function OpenAICard({ gateway, disabled }: { gateway: ReturnType<typeof useGatew
   const authMethod = authStatus?.method;
   const storageBackend = authStatus?.storageBackend || 'file';
   const tokenHealth = authStatus?.tokenHealth || (authenticated ? 'valid' : 'expired');
+  const codexOptions = codexModelsForAuth(authMethod, codexModel);
 
   const handleAuthSuccess = useCallback(() => {
     setShowAuth(false);
@@ -556,11 +651,11 @@ function OpenAICard({ gateway, disabled }: { gateway: ReturnType<typeof useGatew
           {/* model selector */}
           <SettingRow label="model" description="codex model for agent runs">
             <Select value={codexModel} onValueChange={v => set('provider.codex.model', v)} disabled={disabled}>
-              <SelectTrigger className="h-7 w-44 text-[11px]">
+              <SelectTrigger className="h-7 w-52 text-[11px]">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {CODEX_MODELS.map(m => (
+                {codexOptions.map(m => (
                   <SelectItem key={m.value} value={m.value} className="text-[11px]">{m.label}</SelectItem>
                 ))}
               </SelectContent>

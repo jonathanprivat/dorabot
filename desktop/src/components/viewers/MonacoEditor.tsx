@@ -3,6 +3,7 @@ import Editor, { loader, type OnMount } from '@monaco-editor/react';
 import type { editor as monacoEditor } from 'monaco-editor';
 import { useTheme } from '../../hooks/useTheme';
 import { getPalette } from '../../lib/palettes';
+import { getEditorPrefs } from '../../hooks/useEditorPrefs';
 
 // Use bundled monaco-editor directly (no CDN, works offline in Electron)
 import * as monaco from 'monaco-editor';
@@ -218,35 +219,38 @@ export function MonacoEditor({ content, filePath, readOnly = false, onSave, onDi
 
   const language = getMonacoLanguage(filePath);
 
-  // Memoize options to avoid unnecessary re-renders
-  const options = useMemo<monacoEditor.IStandaloneEditorConstructionOptions>(() => ({
-    readOnly,
-    fontSize: 13,
-    lineHeight: 1.5,
-    minimap: { enabled: false },
-    scrollBeyondLastLine: false,
-    wordWrap: 'off',
-    automaticLayout: true,
-    padding: { top: 8, bottom: 8 },
-    scrollbar: {
-      verticalScrollbarSize: 10,
-      horizontalScrollbarSize: 10,
-    },
-    renderLineHighlight: readOnly ? 'none' : 'line',
-    cursorStyle: readOnly ? 'line-thin' : 'line',
-    lineNumbers: 'on',
-    folding: true,
-    bracketPairColorization: { enabled: true },
-    guides: { bracketPairs: true, indentation: true },
-    tabSize: 2,
-    insertSpaces: true,
-    smoothScrolling: true,
-    contextmenu: true,
-    quickSuggestions: false,
-    suggestOnTriggerCharacters: false,
-    parameterHints: { enabled: false },
-    hover: { enabled: false },
-  }), [readOnly]);
+  // Memoize options, reading editor preferences from localStorage
+  const options = useMemo<monacoEditor.IStandaloneEditorConstructionOptions>(() => {
+    const prefs = getEditorPrefs();
+    return {
+      readOnly,
+      fontSize: prefs.fontSize,
+      lineHeight: 1.5,
+      minimap: { enabled: prefs.minimap },
+      scrollBeyondLastLine: false,
+      wordWrap: prefs.wordWrap,
+      automaticLayout: true,
+      padding: { top: 8, bottom: 8 },
+      scrollbar: {
+        verticalScrollbarSize: 10,
+        horizontalScrollbarSize: 10,
+      },
+      renderLineHighlight: readOnly ? 'none' : 'line',
+      cursorStyle: readOnly ? 'line-thin' : 'line',
+      lineNumbers: prefs.lineNumbers,
+      folding: true,
+      bracketPairColorization: { enabled: true },
+      guides: { bracketPairs: true, indentation: true },
+      tabSize: prefs.tabSize,
+      insertSpaces: true,
+      smoothScrolling: true,
+      contextmenu: true,
+      quickSuggestions: false,
+      suggestOnTriggerCharacters: false,
+      parameterHints: { enabled: false },
+      hover: { enabled: false },
+    };
+  }, [readOnly]);
 
   return (
     <Editor
