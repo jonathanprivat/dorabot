@@ -139,7 +139,8 @@ function extractToolDetail(name: string, input: Record<string, unknown>): string
       try { return new URL(String(input.url || '')).hostname; } catch { return ''; }
     }
     case 'WebSearch': return String(input.query || '').slice(0, 40);
-    case 'Task': return String(input.description || '').slice(0, 40);
+    case 'Task':
+    case 'Agent': return String(input.description || '').slice(0, 40);
     case 'message': return '';
     case 'browser': return String(input.action || '');
     case 'screenshot': return '';
@@ -2171,7 +2172,8 @@ export async function startGateway(opts: GatewayOptions): Promise<Gateway> {
             // track Task tool_use IDs
             if (evtType === 'content_block_start') {
               const cb = event.content_block as Record<string, unknown>;
-              if (cb?.type === 'tool_use' && cleanToolName(cb.name as string) === 'Task') {
+              const toolName = cleanToolName(cb.name as string);
+              if (cb?.type === 'tool_use' && (toolName === 'Task' || toolName === 'Agent')) {
                 taskToolUseIds.add(cb.id as string);
               }
             }

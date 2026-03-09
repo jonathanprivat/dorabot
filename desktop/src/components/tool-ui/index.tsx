@@ -51,6 +51,7 @@ const TOOL_MAP: Record<string, React.ComponentType<ToolUIProps>> = {
   tasks_done: PlanTool,
   tasks_delete: PlanTool,
   Task: TaskTool,
+  Agent: TaskTool,
   AskUserQuestion: AskUserQuestionTool,
 }
 

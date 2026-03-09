@@ -10,7 +10,7 @@ import { ChevronDown, ChevronRight, X, Plus, RotateCw } from 'lucide-react';
 
 const TOOL_NAMES = [
   'Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash',
-  'WebFetch', 'WebSearch', 'Task', 'AskUserQuestion', 'TodoWrite',
+  'WebFetch', 'WebSearch', 'Agent', 'AskUserQuestion', 'TodoWrite',
   'message', 'browser', 'screenshot',
   'schedule_reminder', 'schedule_recurring', 'schedule_cron',
   'list_reminders', 'cancel_reminder',

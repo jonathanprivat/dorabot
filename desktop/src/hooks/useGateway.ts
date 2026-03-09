@@ -407,7 +407,7 @@ function sessionMessagesToChatItems(messages: SessionMessage[]): ChatItem[] {
             items.push(item);
 
             // If this is a Task tool, start collecting subagent messages
-            if (name === 'Task') {
+            if (name === 'Task' || name === 'Agent') {
               activeTaskIds.add(block.id);
               taskSubItems.set(block.id, []);
             }

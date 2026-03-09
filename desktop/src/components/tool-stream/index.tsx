@@ -22,6 +22,7 @@ const STREAM_MAP: Record<string, React.ComponentType<ToolUIProps>> = {
   Write: FileStream,
   Edit: FileStream,
   Task: TaskStream,
+  Agent: TaskStream,
   schedule: CronStream,
   list_schedule: CronStream,
   update_schedule: CronStream,
