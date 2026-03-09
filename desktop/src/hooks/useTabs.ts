@@ -393,6 +393,11 @@ export function useTabs(gw: ReturnType<typeof useGateway>, layout: ReturnType<ty
   }, [tabs, gw, layout]);
 
   const closeTab = useCallback((tabId: string) => {
+    // Warn if tab has unsaved changes
+    if (dirtyTabs.has(tabId)) {
+      if (!window.confirm('You have unsaved changes. Close anyway?')) return;
+    }
+
     closingRef.current = true;
 
     // Remove from layout group (reads current state, queues layout update)

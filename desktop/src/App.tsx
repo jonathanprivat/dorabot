@@ -11,6 +11,8 @@ import { EditorGroupPanel } from './components/EditorGroupPanel';
 import { TabDragOverlay } from './components/TabBar';
 import { FileExplorer } from './components/FileExplorer';
 import { OnboardingOverlay } from './components/Onboarding';
+import { GlobalSearch } from './components/GlobalSearch';
+import { ShortcutHelp } from './components/ShortcutHelp';
 import { DndContext, DragOverlay, PointerSensor, useSensor, useSensors, type DragEndEvent, type DragStartEvent } from '@dnd-kit/core';
 import { cn } from '@/lib/utils';
 import { Toaster, toast } from 'sonner';
@@ -25,6 +27,7 @@ import {
   ShieldAlert, CalendarCheck, Target, FlaskConical, KeyRound, GitBranch, Check, Palette
 } from 'lucide-react';
 import { PALETTES } from './lib/palettes';
+import { ToastContainer } from './components/ToastContainer';
 
 type SessionFilter = 'all' | 'desktop' | 'telegram' | 'whatsapp';
 type UpdateState = {
@@ -250,6 +253,8 @@ export default function App() {
   const { palette, glass, setPalette, setGlass } = useTheme();
   const [updateState, setUpdateState] = useState<UpdateState>({ status: 'idle' });
   const [quickOpenOpen, setQuickOpenOpen] = useState(false);
+  const [showGlobalSearch, setShowGlobalSearch] = useState(false);
+  const [showShortcutHelp, setShowShortcutHelp] = useState(false);
   const [quickOpenRoot, setQuickOpenRoot] = useState('');
   const [quickOpenQuery, setQuickOpenQuery] = useState('');
   const [quickOpenFiles, setQuickOpenFiles] = useState<QuickOpenFile[]>([]);
@@ -259,6 +264,7 @@ export default function App() {
   const quickOpenCacheRef = useRef<{ root: string; files: QuickOpenFile[] } | null>(null);
   const quickOpenRequestRef = useRef(0);
   const quickOpenInputRef = useRef<HTMLInputElement>(null);
+  const codexReauthTimersRef = useRef<Record<string, { poll: number; timeout: number }>>({});
   const notify = useCallback((body: string) => {
     const api = (window as any).electronAPI;
     if (api?.notify) {
@@ -270,6 +276,48 @@ export default function App() {
       new Notification('dorabot', { body, icon });
     } catch {}
   }, []);
+  const openExternal = useCallback((url: string) => {
+    (window as any).electronAPI?.openExternal?.(url) || window.open(url, '_blank');
+  }, []);
+  const clearCodexReauth = useCallback((loginId: string) => {
+    const timers = codexReauthTimersRef.current[loginId];
+    if (!timers) return;
+    window.clearInterval(timers.poll);
+    window.clearTimeout(timers.timeout);
+    delete codexReauthTimersRef.current[loginId];
+  }, []);
+  const startCodexReauth = useCallback((authUrl: string, loginId: string) => {
+    if (codexReauthTimersRef.current[loginId]) return;
+    openExternal(authUrl);
+    const poll = window.setInterval(async () => {
+      try {
+        const res = await gw.completeOAuth('codex', loginId);
+        if (res.authenticated) {
+          clearCodexReauth(loginId);
+          toast.success('Codex re-authenticated', { duration: 4000 });
+        }
+      } catch {
+        // still waiting for the browser flow to finish
+      }
+    }, 2000);
+    const timeout = window.setTimeout(() => {
+      clearCodexReauth(loginId);
+      toast.error('Codex re-authentication timed out', {
+        duration: 10000,
+        action: {
+          label: 'Settings',
+          onClick: () => tabState.openTab({ id: 'view:settings', type: 'settings', label: 'Settings', closable: true }),
+        },
+      });
+    }, 120_000);
+    codexReauthTimersRef.current[loginId] = { poll, timeout };
+  }, [clearCodexReauth, gw, openExternal, tabState]);
+
+  useEffect(() => () => {
+    for (const loginId of Object.keys(codexReauthTimersRef.current)) {
+      clearCodexReauth(loginId);
+    }
+  }, [clearCodexReauth]);
 
   // Auto-update listener
   useEffect(() => {
@@ -454,16 +502,31 @@ export default function App() {
           }
           break;
         case 'auth.reauth':
-          toast.error('Session expired, re-authentication needed', {
-            icon: <KeyRound className="w-4 h-4 text-red-400" />,
-            duration: 15000,
-            action: {
-              label: 'Re-authenticate',
-              onClick: () => window.open(event.authUrl, '_blank'),
-            },
-          });
+          if (event.provider === 'codex' && event.loginId) {
+            startCodexReauth(event.authUrl, event.loginId);
+            toast.error('Codex session expired, reopening sign-in', {
+              icon: <KeyRound className="w-4 h-4 text-red-400" />,
+              duration: 10000,
+              action: {
+                label: 'Settings',
+                onClick: () => tabState.openTab({ id: 'view:settings', type: 'settings', label: 'Settings', closable: true }),
+              },
+            });
+          } else {
+            toast.error(`${event.provider} session expired`, {
+              icon: <KeyRound className="w-4 h-4 text-red-400" />,
+              duration: 15000,
+              action: {
+                label: 'Re-authenticate',
+                onClick: () => {
+                  tabState.openTab({ id: 'view:settings', type: 'settings', label: 'Settings', closable: true });
+                  openExternal(event.authUrl);
+                },
+              },
+            });
+          }
           if (!windowFocused) {
-            notify('Session expired — re-authentication needed');
+            notify(`${event.provider} session expired`);
             playNotifSound();
           }
           break;
@@ -499,7 +562,7 @@ export default function App() {
       }
     };
     return () => { gw.onNotifiableEventRef.current = null; };
-  }, [gw.onNotifiableEventRef, notify, tabState]);
+  }, [gw.onNotifiableEventRef, notify, openExternal, startCodexReauth, tabState]);
 
   const filteredSessions = useMemo(() => {
     if (sessionFilter === 'all') return gw.sessions;
@@ -720,6 +783,8 @@ export default function App() {
     prevTab: () => tabState.prevTab(),
     focusTabByIndex: (i: number) => tabState.focusTabByIndex(i),
     openQuickOpen: () => openQuickOpen(),
+    openGlobalSearch: () => setShowGlobalSearch(true),
+    openShortcutHelp: () => setShowShortcutHelp(p => !p),
     previewMarkdown: () => {
       const tab = tabState.activeTab;
       if (!tab || tab.type !== 'file' || !tab.filePath.toLowerCase().endsWith('.md')) return;
@@ -1134,6 +1199,16 @@ export default function App() {
         </div>
       )}
 
+      <ShortcutHelp open={showShortcutHelp} onClose={() => setShowShortcutHelp(false)} />
+
+      <GlobalSearch
+        open={showGlobalSearch}
+        onClose={() => setShowGlobalSearch(false)}
+        rpc={gw.rpc}
+        viewRoot={fileExplorerStateRef.current.viewRoot || ''}
+        onOpenFile={(path) => { tabState.openFileTab(path); setShowGlobalSearch(false); }}
+      />
+
       {/* titlebar — pure drag chrome */}
       <div className="h-11 bg-card glass border-b border-border flex items-center pl-[78px] pr-4 shrink-0" style={{ WebkitAppRegion: 'drag' } as any}>
         <img src={dorabotImg} alt="dorabot" className="h-8 mr-1 dorabot-alive" style={{ imageRendering: 'pixelated' }} />
@@ -1445,6 +1520,7 @@ export default function App() {
           </>
         )}
       </ResizablePanelGroup>
+      <ToastContainer />
     </TooltipProvider>
   );
 }

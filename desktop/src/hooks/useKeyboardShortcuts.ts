@@ -21,6 +21,8 @@ type ShortcutActions = {
   focusGroupUp: () => void;
   focusGroupDown: () => void;
   openTerminal: () => void;
+  openGlobalSearch: () => void;
+  openShortcutHelp: () => void;
 };
 
 type ShortcutOptions = {
@@ -86,6 +88,13 @@ export function useKeyboardShortcuts(actions: ShortcutActions, options: Shortcut
         return;
       }
 
+      // Cmd+Shift+F — global search
+      if (e.key.toLowerCase() === 'f' && e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        actions.openGlobalSearch();
+        return;
+      }
+
       // Cmd+P — quick open file
       if (e.key.toLowerCase() === 'p' && !e.shiftKey && !e.altKey) {
         e.preventDefault();
@@ -111,6 +120,13 @@ export function useKeyboardShortcuts(actions: ShortcutActions, options: Shortcut
       if (e.key === '`' && !e.shiftKey) {
         e.preventDefault();
         actions.openTerminal();
+        return;
+      }
+
+      // Cmd+/ — shortcut help
+      if (e.key === '/') {
+        e.preventDefault();
+        actions.openShortcutHelp();
         return;
       }
 

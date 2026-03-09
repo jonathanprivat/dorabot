@@ -55,6 +55,12 @@ function DraggableTab({
   onFocusTab,
   onCloseTab,
   onContextMenu,
+  isRenaming,
+  renameValue,
+  onRenameChange,
+  onRenameCommit,
+  onRenameCancel,
+  onStartRename,
 }: {
   tab: Tab;
   isActive: boolean;
@@ -65,6 +71,12 @@ function DraggableTab({
   onFocusTab: (id: string) => void;
   onCloseTab: (id: string) => void;
   onContextMenu: (e: React.MouseEvent, tabId: string) => void;
+  isRenaming?: boolean;
+  renameValue?: string;
+  onRenameChange?: (v: string) => void;
+  onRenameCommit?: () => void;
+  onRenameCancel?: () => void;
+  onStartRename?: () => void;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: `tab:${tab.id}`,
@@ -104,7 +116,22 @@ function DraggableTab({
           getTabIcon(tab)
         )}
       </span>
-      <span className="truncate flex-1">{tab.label}</span>
+      {isRenaming ? (
+        <input
+          className="truncate flex-1 bg-transparent outline-none text-[11px] font-mono border-b border-primary px-0"
+          value={renameValue}
+          onChange={e => onRenameChange?.(e.target.value)}
+          onKeyDown={e => {
+            if (e.key === 'Enter') onRenameCommit?.();
+            if (e.key === 'Escape') onRenameCancel?.();
+          }}
+          onBlur={() => onRenameCommit?.()}
+          autoFocus
+          onClick={e => e.stopPropagation()}
+        />
+      ) : (
+        <span className="truncate flex-1" onDoubleClick={e => { e.stopPropagation(); onStartRename?.(); }}>{tab.label}</span>
+      )}
       {!isActive && unreadCount > 0 && (
         <span className="shrink-0 rounded-full bg-primary text-primary-foreground text-[9px] px-1.5 min-w-[14px] text-center">
           {unreadCount > 99 ? '99+' : unreadCount}
@@ -165,6 +192,7 @@ function TabContextMenu({
   onCloseTabsToRight,
   onSplitRight,
   onSplitDown,
+  onRename,
 }: {
   menu: NonNullable<ContextMenuState>;
   tabs: Tab[];
@@ -175,6 +203,7 @@ function TabContextMenu({
   onCloseTabsToRight: (tabId: string, groupId: string) => void;
   onSplitRight: () => void;
   onSplitDown: () => void;
+  onRename?: (tabId: string) => void;
 }) {
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -250,6 +279,15 @@ function TabContextMenu({
         <span>Close to the Right</span>
       </div>
 
+      {onRename && (isTerminalTab(tab!) || isChatTab(tab!)) && (
+        <div
+          className={itemClass}
+          onClick={() => handleAction(() => onRename(menu.tabId))}
+        >
+          <span>Rename</span>
+        </div>
+      )}
+
       <div className="h-px bg-border my-1" />
 
       {isFile && filePath && (
@@ -303,10 +341,13 @@ type TabBarProps = {
   onCloseTabsToRight?: (tabId: string, groupId: string) => void;
   onSplitRight?: () => void;
   onSplitDown?: () => void;
+  onRenameTab?: (tabId: string, newLabel: string) => void;
 };
 
-export function TabBar({ tabs, activeTabId, sessionStates, unreadBySession = {}, dirtyTabs, isActiveGroup, isMultiPane, groupId, onFocusTab, onCloseTab, onNewChat, onNewTerminal, onCloseOtherTabs, onCloseAllTabs, onCloseTabsToRight, onSplitRight, onSplitDown }: TabBarProps) {
+export function TabBar({ tabs, activeTabId, sessionStates, unreadBySession = {}, dirtyTabs, isActiveGroup, isMultiPane, groupId, onFocusTab, onCloseTab, onNewChat, onNewTerminal, onCloseOtherTabs, onCloseAllTabs, onCloseTabsToRight, onSplitRight, onSplitDown, onRenameTab }: TabBarProps) {
   const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
+  const [renamingTabId, setRenamingTabId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
 
   const { setNodeRef, isOver } = useDroppable({
     id: `group-drop:${groupId || 'default'}`,
@@ -346,6 +387,15 @@ export function TabBar({ tabs, activeTabId, sessionStates, unreadBySession = {},
               onFocusTab={onFocusTab}
               onCloseTab={onCloseTab}
               onContextMenu={handleContextMenu}
+              isRenaming={renamingTabId === tab.id}
+              renameValue={renamingTabId === tab.id ? renameValue : ''}
+              onRenameChange={setRenameValue}
+              onRenameCommit={() => {
+                if (renameValue.trim() && onRenameTab) onRenameTab(tab.id, renameValue.trim());
+                setRenamingTabId(null);
+              }}
+              onRenameCancel={() => setRenamingTabId(null)}
+              onStartRename={() => { setRenamingTabId(tab.id); setRenameValue(tab.label); }}
             />
           );
         })}
@@ -380,6 +430,10 @@ export function TabBar({ tabs, activeTabId, sessionStates, unreadBySession = {},
           onCloseTabsToRight={onCloseTabsToRight || (() => {})}
           onSplitRight={onSplitRight || (() => {})}
           onSplitDown={onSplitDown || (() => {})}
+          onRename={onRenameTab ? (tabId) => {
+            const tab = tabs.find(t => t.id === tabId);
+            if (tab) { setRenamingTabId(tabId); setRenameValue(tab.label); }
+          } : undefined}
         />
       )}
     </div>
