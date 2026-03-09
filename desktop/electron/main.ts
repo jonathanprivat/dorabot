@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Tray, Menu, nativeImage, session, ipcMain, Notification as ElectronNotification } from 'electron';
+import { app, BrowserWindow, Tray, Menu, nativeImage, session, ipcMain, shell, Notification as ElectronNotification } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import { is } from '@electron-toolkit/utils';
 import * as path from 'path';
@@ -162,6 +162,20 @@ function createWindow(): void {
       event.preventDefault();
       mainWindow?.webContents.send('close-tab');
     }
+  });
+
+  // Open external links in the system browser instead of navigating the Electron window
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    const appOrigin = mainWindow?.webContents.getURL();
+    if (appOrigin && new URL(url).origin !== new URL(appOrigin).origin) {
+      event.preventDefault();
+      shell.openExternal(url);
+    }
+  });
+
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    shell.openExternal(url);
+    return { action: 'deny' };
   });
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {

@@ -1436,12 +1436,6 @@ export async function startGateway(opts: GatewayOptions): Promise<Gateway> {
       }
     },
     onApprovalResponse: (requestId, approved, reason) => {
-      const pendingTask = pendingTaskApprovals.get(requestId);
-      if (pendingTask) {
-        pendingTaskApprovals.delete(requestId);
-        void handleTaskApprovalDecision(pendingTask.taskId, requestId, approved, reason);
-        return;
-      }
       const pending = pendingApprovals.get(requestId);
       if (!pending) return;
       pendingApprovals.delete(requestId);
@@ -1738,11 +1732,6 @@ export async function startGateway(opts: GatewayOptions): Promise<Gateway> {
     timeout: NodeJS.Timeout | null;
   }>();
 
-  const pendingTaskApprovals = new Map<string, {
-    taskId: string;
-    requestedAt: number;
-  }>();
-
   async function waitForApproval(requestId: string, toolName: string, input: Record<string, unknown>, timeoutMs?: number, sessionKey?: string): Promise<{ approved: boolean; reason?: string; modifiedInput?: Record<string, unknown> }> {
     // persist to snapshot
     if (sessionKey) {
@@ -1802,7 +1791,6 @@ export async function startGateway(opts: GatewayOptions): Promise<Gateway> {
     task.plan = readTaskPlanDoc(task);
     task.status = 'in_progress';
     task.reason = undefined;
-    task.approvalRequestId = undefined;
     task.sessionKey = sessionKey;
     task.sessionId = session.sessionId;
     task.updatedAt = now;
@@ -1848,94 +1836,7 @@ export async function startGateway(opts: GatewayOptions): Promise<Gateway> {
     };
   }
 
-  async function handleTaskApprovalDecision(taskId: string, requestId: string, approved: boolean, reason?: string, mode: 'plan' | 'execute' = 'execute'): Promise<{
-    started: boolean;
-    taskId: string;
-    sessionKey: string;
-    sessionId: string;
-    chatId: string;
-  } | null> {
-    const tasks = loadTasks();
-    const task = tasks.tasks.find(t => t.id === taskId);
-    if (!task) return null;
-    if (task.approvalRequestId && task.approvalRequestId !== requestId) return null;
-
-    if (!approved) {
-      task.status = 'planned';
-      task.reason = reason || 'approval denied';
-      task.updatedAt = new Date().toISOString();
-      task.approvalRequestId = undefined;
-      saveTasks(tasks);
-      appendTaskLog(task.id, 'approval_denied', task.reason);
-      broadcast({ event: 'goals.update', data: { taskId: task.id, task } });
-      macNotify('Dora', `Task denied: ${task.title}`);
-      void sendTelegramOwnerStatus(`❌ Task #${task.id} not approved: ${task.title}\nReason: ${task.reason}`);
-      return null;
-    }
-
-    task.approvedAt = new Date().toISOString();
-    task.reason = undefined;
-    task.updatedAt = task.approvedAt;
-    task.approvalRequestId = undefined;
-    saveTasks(tasks);
-    appendTaskLog(task.id, 'approved', 'Task approved');
-    broadcast({ event: 'goals.update', data: { taskId: task.id, task } });
-    void sendTelegramOwnerStatus(`✅ Task #${task.id} approved: ${task.title}`);
-    try {
-      return await startTaskExecution(task.id, mode);
-    } catch (err) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      appendTaskLog(task.id, 'run_error', errMsg);
-      macNotify('Dora', `Task start failed: ${task.title}`);
-      return null;
-    }
-  }
-
-  async function requestTaskApproval(taskId: string, targetChannel?: string, targetChatId?: string, sessionKey?: string): Promise<void> {
-    const tasks = loadTasks();
-    const task = tasks.tasks.find(t => t.id === taskId);
-    if (!task) return;
-    if (task.status !== 'planned') return;
-    if (task.approvalRequestId) return;
-
-    const requestId = randomUUID();
-    task.approvalRequestId = requestId;
-    task.updatedAt = new Date().toISOString();
-    saveTasks(tasks);
-    appendTaskLog(task.id, 'approval_requested', 'Waiting for human approval');
-    broadcast({ event: 'goals.update', data: { taskId: task.id, task } });
-
-    const input = {
-      taskId: task.id,
-      goalId: task.goalId,
-      title: task.title,
-      plan: readTaskPlanDoc(task) || task.plan || '',
-    };
-
-    pendingTaskApprovals.set(requestId, { taskId: task.id, requestedAt: Date.now() });
-    broadcast({
-      event: 'agent.tool_approval',
-      data: {
-        requestId,
-        toolName: 'task_start',
-        input,
-        tier: 'require-approval',
-        sessionKey,
-        timestamp: Date.now(),
-      },
-    });
-    channelManager.sendApprovalRequest({ requestId, toolName: 'task_start', input, chatId: targetChatId }, targetChannel).catch(() => {});
-    macNotify('Dora', `Approval needed: ${task.title}`);
-    void sendTelegramOwnerStatus(`🛡️ Task #${task.id} awaiting approval: ${task.title}`);
-  }
-
-  async function requestPendingTaskApprovals(targetChannel?: string, targetChatId?: string, sessionKey?: string): Promise<void> {
-    const tasks = loadTasks();
-    const pending = tasks.tasks.filter(task => task.status === 'planned' && !task.approvalRequestId);
-    for (const task of pending) {
-      await requestTaskApproval(task.id, targetChannel, targetChatId, sessionKey);
-    }
-  }
+  // approval pipeline removed -- tasks move freely between statuses
 
   function getChannelToolPolicy(channel?: string): ToolPolicyConfig | undefined {
     if (!channel || channel === 'desktop') return undefined;
@@ -2715,11 +2616,6 @@ export async function startGateway(opts: GatewayOptions): Promise<Gateway> {
               }
             }
 
-            try {
-              await requestPendingTaskApprovals(channel, messageMetadata?.chatId, sessionKey);
-            } catch (err) {
-              console.error('[gateway] failed requesting pending task approvals:', err);
-            }
 
             // per-turn channel cleanup — delete status msg, send result, reset for next turn
             const ctx = channelRunContexts.get(sessionKey);
@@ -3587,6 +3483,23 @@ export async function startGateway(opts: GatewayOptions): Promise<Gateway> {
           goal.updatedAt = new Date().toISOString();
           saveGoals(goals);
 
+          // when goal is marked done, cancel pending tasks under it
+          if (goal.status === 'done') {
+            const tasks = loadTasks();
+            let changed = false;
+            for (const task of tasks.tasks) {
+              if (task.goalId !== goalId) continue;
+              if (task.status === 'done' || task.status === 'cancelled') continue;
+              if (task.status === 'in_progress') continue; // don't cancel running tasks
+              task.status = 'cancelled';
+              task.reason = 'goal completed';
+              task.updatedAt = goal.updatedAt;
+              appendTaskLog(task.id, 'auto_cancelled', 'Cancelled: parent goal marked done');
+              changed = true;
+            }
+            if (changed) saveTasks(tasks);
+          }
+
           broadcast({ event: 'goals.update', data: { goalId: goal.id, goal } });
           macNotify('Dora', `Goal updated: ${goal.title}`);
           return { id, result: goal };
@@ -3631,10 +3544,7 @@ export async function startGateway(opts: GatewayOptions): Promise<Gateway> {
           const now = new Date().toISOString();
           const ids = tasks.tasks.map(t => Number.parseInt(t.id, 10)).filter(n => Number.isFinite(n));
           const taskId = String((ids.length ? Math.max(...ids) : 0) + 1);
-          const requestedStatus = (params?.status as Task['status']) || 'planning';
-          const normalizedStatus = (requestedStatus === 'in_progress' || requestedStatus === 'done')
-            ? 'planned'
-            : requestedStatus;
+          const normalizedStatus = (params?.status as Task['status']) || 'todo';
           const task: Task = {
             id: taskId,
             goalId: params?.goalId as string | undefined,
@@ -3657,9 +3567,6 @@ export async function startGateway(opts: GatewayOptions): Promise<Gateway> {
           appendTaskLog(task.id, 'rpc_add', `Task created: ${task.title}`);
           broadcast({ event: 'goals.update', data: { taskId: task.id, task } });
           macNotify('Dora', `Task created: ${task.title}`);
-          if (task.status === 'planned') {
-            await requestTaskApproval(task.id);
-          }
           return { id, result: task };
         }
 
@@ -3685,17 +3592,12 @@ export async function startGateway(opts: GatewayOptions): Promise<Gateway> {
 
           const requestedStatus = params?.status as Task['status'] | undefined;
           if (requestedStatus !== undefined) {
-            if ((requestedStatus === 'in_progress' || requestedStatus === 'done') && !task.approvedAt) {
-              task.status = 'planned';
-            } else {
-              task.status = requestedStatus;
-            }
+            task.status = requestedStatus;
           }
 
           task.updatedAt = new Date().toISOString();
           if (task.status === 'done' && !task.completedAt) task.completedAt = task.updatedAt;
           if (task.status !== 'done') task.completedAt = undefined;
-          if (task.status !== 'planned') task.approvalRequestId = undefined;
           saveTasks(tasks);
 
           appendTaskLog(task.id, 'rpc_update', `Task updated: ${task.title}`, {
@@ -3704,10 +3606,6 @@ export async function startGateway(opts: GatewayOptions): Promise<Gateway> {
           });
           broadcast({ event: 'goals.update', data: { taskId: task.id, task } });
           macNotify('Dora', `Task updated: ${task.title}`);
-
-          if (task.status === 'planned') {
-            await requestTaskApproval(task.id);
-          }
 
           return { id, result: task };
         }
@@ -3784,59 +3682,14 @@ export async function startGateway(opts: GatewayOptions): Promise<Gateway> {
           if (!taskId) return { id, error: 'id required' };
           const mode = (params?.mode as 'plan' | 'execute') || 'execute';
 
-          const tasks = loadTasks();
-          const task = tasks.tasks.find(t => t.id === taskId);
-          if (!task) return { id, error: 'task not found' };
-          if (task.status === 'planned' || task.approvalRequestId) {
-            const requestId = task.approvalRequestId || randomUUID();
-            pendingTaskApprovals.delete(requestId);
-            const startedFromApproval = await handleTaskApprovalDecision(task.id, requestId, true, undefined, mode);
-            if (!startedFromApproval) return { id, error: 'task approval failed' };
-            return { id, result: startedFromApproval };
+          try {
+            const started = await startTaskExecution(taskId, mode);
+            return { id, result: started };
+          } catch (err) {
+            return { id, error: err instanceof Error ? err.message : String(err) };
           }
-
-          const started = await startTaskExecution(task.id, mode);
-          return { id, result: started };
         }
 
-        case 'tasks.approve': {
-          const requestId = params?.requestId as string | undefined;
-          const taskId = params?.taskId as string | undefined;
-
-          let finalTaskId = taskId;
-          let finalRequestId = requestId;
-          if (!finalRequestId && finalTaskId) {
-            const task = loadTasks().tasks.find(t => t.id === finalTaskId);
-            finalRequestId = task?.approvalRequestId;
-          }
-          if (!finalTaskId && finalRequestId) {
-            finalTaskId = pendingTaskApprovals.get(finalRequestId)?.taskId;
-          }
-          if (!finalTaskId || !finalRequestId) return { id, error: 'taskId or requestId required' };
-          pendingTaskApprovals.delete(finalRequestId);
-          await handleTaskApprovalDecision(finalTaskId, finalRequestId, true);
-          return { id, result: { approved: true, taskId: finalTaskId } };
-        }
-
-        case 'tasks.deny': {
-          const requestId = params?.requestId as string | undefined;
-          const taskId = params?.taskId as string | undefined;
-          const reason = (params?.reason as string) || 'user denied';
-
-          let finalTaskId = taskId;
-          let finalRequestId = requestId;
-          if (!finalRequestId && finalTaskId) {
-            const task = loadTasks().tasks.find(t => t.id === finalTaskId);
-            finalRequestId = task?.approvalRequestId;
-          }
-          if (!finalTaskId && finalRequestId) {
-            finalTaskId = pendingTaskApprovals.get(finalRequestId)?.taskId;
-          }
-          if (!finalTaskId || !finalRequestId) return { id, error: 'taskId or requestId required' };
-          pendingTaskApprovals.delete(finalRequestId);
-          await handleTaskApprovalDecision(finalTaskId, finalRequestId, false, reason);
-          return { id, result: { approved: false, taskId: finalTaskId, reason } };
-        }
 
         case 'plans.list': {
           const plans = loadPlans();
@@ -5390,12 +5243,6 @@ export async function startGateway(opts: GatewayOptions): Promise<Gateway> {
         case 'tool.approve': {
           const requestId = params?.requestId as string;
           if (!requestId) return { id, error: 'requestId required' };
-          const pendingTask = pendingTaskApprovals.get(requestId);
-          if (pendingTask) {
-            pendingTaskApprovals.delete(requestId);
-            const started = await handleTaskApprovalDecision(pendingTask.taskId, requestId, true);
-            return { id, result: { approved: true, taskId: pendingTask.taskId, started: Boolean(started) } };
-          }
           const pending = pendingApprovals.get(requestId);
           if (!pending) return { id, error: 'no pending approval with that ID' };
           pendingApprovals.delete(requestId);
@@ -5407,13 +5254,6 @@ export async function startGateway(opts: GatewayOptions): Promise<Gateway> {
         case 'tool.deny': {
           const requestId = params?.requestId as string;
           if (!requestId) return { id, error: 'requestId required' };
-          const pendingTask = pendingTaskApprovals.get(requestId);
-          if (pendingTask) {
-            pendingTaskApprovals.delete(requestId);
-            const reason = (params?.reason as string) || 'user denied';
-            await handleTaskApprovalDecision(pendingTask.taskId, requestId, false, reason);
-            return { id, result: { denied: true, taskId: pendingTask.taskId } };
-          }
           const pending = pendingApprovals.get(requestId);
           if (!pending) return { id, error: 'no pending approval with that ID' };
           pendingApprovals.delete(requestId);
@@ -5428,12 +5268,6 @@ export async function startGateway(opts: GatewayOptions): Promise<Gateway> {
             toolName: p.toolName,
             input: p.input,
           }));
-          const taskList = Array.from(pendingTaskApprovals.entries()).map(([reqId, p]) => ({
-            requestId: reqId,
-            toolName: 'task_start',
-            input: { taskId: p.taskId },
-          }));
-          list.push(...taskList);
           return { id, result: list };
         }
 

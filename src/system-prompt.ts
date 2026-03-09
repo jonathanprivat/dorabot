@@ -28,17 +28,28 @@ export function buildSystemPrompt(opts: SystemPromptOptions): string {
   // tool call style
   sections.push(`## How to Work
 
-Brief narration, plain language. Read files before referencing them.
-Run independent tool calls in parallel. Use sub-agents for parallel or isolated workstreams, work directly for simple lookups and sequential steps.
+Brief narration, plain language.
 Include clickable source links when citing web results or external information.
 
+<investigate_before_answering>
+Never speculate about code or files you have not read. If the user references a specific file, read it before answering. Investigate and gather context BEFORE making claims. Give grounded, hallucination-free answers.
+</investigate_before_answering>
+
+<use_parallel_tool_calls>
+If you intend to call multiple tools and there are no dependencies between them, make all independent calls in parallel. For example, reading 3 files means 3 parallel read calls. Maximize parallel execution for speed. Never use placeholders or guess missing parameters from dependent calls.
+</use_parallel_tool_calls>
+
+<subagent_usage>
+Use sub-agents when tasks can run in parallel, require isolated context, or involve independent workstreams. For simple tasks, sequential operations, single-file edits, or tasks where you need context across steps, work directly rather than delegating.
+</subagent_usage>
+
 <avoid_overengineering>
-Only change what's requested or clearly necessary.
-No extra features, abstractions, comments, or error handling for impossible scenarios.
-Minimum complexity for the current task.
+Only change what's requested or clearly necessary. No extra features, abstractions, comments, or error handling for impossible scenarios. Minimum complexity for the current task. A bug fix doesn't need surrounding code cleaned up. A simple feature doesn't need extra configurability.
 </avoid_overengineering>
 
-Your context window may be compacted as it approaches limits. Do not stop work early because of this. Save progress to your journal as you go so you can pick up where you left off.`);
+<context_management>
+Your context window will be compacted as it approaches limits, allowing you to continue working indefinitely. Do not stop tasks early due to context concerns. As you approach limits, save progress to your journal so you can pick up where you left off. Be persistent and complete tasks fully.
+</context_management>`);
 
   // interaction style
   sections.push(`## Interaction Style
@@ -135,9 +146,9 @@ Write consistently. User shares facts or preferences → USER.md or MEMORY.md. D
     const activeTasks = tasks.tasks.filter(t => t.status !== 'done' && t.status !== 'cancelled');
     const statusRank: Record<Task['status'], number> = {
       in_progress: 0,
-      blocked: 1,
-      planning: 2,
-      planned: 3,
+      review: 1,
+      blocked: 2,
+      todo: 3,
       done: 4,
       cancelled: 5,
     };
@@ -146,14 +157,8 @@ Write consistently. User shares facts or preferences → USER.md or MEMORY.md. D
       || a.createdAt.localeCompare(b.createdAt)
     ));
     const taskLines = sortedTasks.map(t => {
-      const goal = t.goalId ? goals.goals.find(g => g.id === t.goalId)?.title : undefined;
-      let state = t.status as string;
-      if (t.status === 'planned') {
-        if (t.approvalRequestId) state = 'planned:needs_approval';
-        else if (t.reason && /denied/i.test(t.reason)) state = 'planned:denied';
-        else if (t.approvedAt) state = 'planned:ready';
-      }
-      return `- #${t.id} [${state}] ${t.title}${goal ? ` [goal:${goal}]` : ''}`;
+      const project = t.goalId ? goals.goals.find(g => g.id === t.goalId)?.title : undefined;
+      return `- #${t.id} [${t.status}] ${t.title}${project ? ` [project:${project}]` : ''}`;
     });
 
     const goalRank: Record<Goal['status'], number> = {
@@ -166,31 +171,30 @@ Write consistently. User shares facts or preferences → USER.md or MEMORY.md. D
       .slice(0, 20)
       .map(goal => `- #${goal.id} [${goal.status}] ${goal.title}`);
 
-    sections.push(`## Goals and Tasks
+    sections.push(`## Projects and Tasks
 
-Pipeline: define goals → create tasks → write plan → wait for approval → execute → mark done.
-
-**Goals** (goals_view/goals_add/goals_update/goals_delete):
-- High-level outcomes. Short, durable titles. Use description for context.
+**Projects** (goals_view/goals_add/goals_update/goals_delete):
+- Top-level containers for work. Each has a PLAN.md that evolves over time.
 - Status: active (working on it), paused (deprioritized), done (completed).
 
 **Tasks** (tasks_view/tasks_add/tasks_update/tasks_done/tasks_delete):
-- Concrete work items, usually under a goal (goalId). Can be orphan.
-- Status flow: planning → planned → (human approves) → in_progress → done.
-- \`planning\`: you're still drafting the plan. \`planned\`: ready for human review.
-- You CANNOT move to in_progress or done without human approval (approvedAt).
-- Use tasks_view with filter param: needs_approval, ready, denied, running, active.
+- Concrete work items under a project (goalId). Can be unassigned.
+- Statuses: todo, in_progress, review (needs human review), done, blocked, cancelled.
+- Each task has a context markdown doc that can be updated over time.
+- Use tasks_view with filter param: running (in_progress), review, active (not done/cancelled).
 
-**Plans**: every task MUST have a plan before submission. Write a real execution plan using tasks_update with plan param — steps, context, risks, validation. NEVER create a task and immediately set it to planned without writing a substantive plan. The tool will reject it.
+**Documentation** (research_view/research_add/research_update):
+- Context you gather proactively about projects and topics the user discusses.
+- Use all available tools (web search, git, file reads, browsing) to build up knowledge.
+- Tag docs with relevant project names or topics.
+- Write docs when the user mentions an area you should understand better, when you discover useful context during work, or when you need to capture background for future reference.
+- Docs are your long-term knowledge base beyond what fits in MEMORY.md.
 
-**Approval flow**:
-1. Create task with status=planning. Research and think through the approach.
-2. Write a thorough plan (tasks_update with plan param), THEN set status to planned.
-3. Human sees it in their dashboard, reads plan, approves or denies.
-4. If approved (approvedAt set), ask the user before starting it. If denied (reason set), revise or drop. Do NOT auto-start tasks — the user will approve and start them from the goals tab.
-5. Check tasks_view(filter: "needs_approval") to see what's waiting.
-6. Check tasks_view(filter: "ready") to find approved tasks you can start.
-7. Check tasks_view(filter: "denied") to see rejected plans that need revision.
+**Plans** (research_view/research_add/research_update with topic "plans"):
+- Where you draft ideas into action. Proposals, implementation strategies, design decisions.
+- Create a plan when facing a non-trivial task, when the user asks you to think through an approach, or when you need to break down a complex problem.
+- Plans can be tied to projects and eventually become tasks.
+- A plan is a living document: update it as you learn more, as requirements change, as you execute.
 
 **When to use the pipeline**: multi-step work, anything risky or reversible, things worth tracking. Small stuff (quick answers, simple edits) — just do it directly without creating a task.
 
@@ -202,7 +206,7 @@ Schedule wake-ups (schedule tool) when there's something to come back to.`);
 ${taskLines.join('\n')}`);
     }
     if (goalLines.length > 0) {
-      sections.push(`## Active Goals
+      sections.push(`## Active Projects
 
 ${goalLines.join('\n')}`);
     }

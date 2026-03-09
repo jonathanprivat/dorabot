@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { getDb } from '../db.js';
 import { PLANS_DIR } from '../workspace.js';
 
-export type TaskStatus = 'planning' | 'planned' | 'in_progress' | 'done' | 'blocked' | 'cancelled';
+export type TaskStatus = 'todo' | 'in_progress' | 'review' | 'done' | 'blocked' | 'cancelled';
 
 export type Task = {
   id: string;
@@ -18,8 +18,6 @@ export type Task = {
   reason?: string;
   sessionId?: string;
   sessionKey?: string;
-  approvalRequestId?: string;
-  approvedAt?: string;
   createdAt: string;
   updatedAt: string;
   completedAt?: string;
@@ -37,12 +35,12 @@ function normalizeTaskPlan(task: Task, content?: string): string {
   const trimmed = content?.trim();
   if (trimmed) return `${trimmed}\n`;
 
-  const goalLabel = task.goalId ? `#${task.goalId}` : '(orphan)';
+  const projectLabel = task.goalId ? `#${task.goalId}` : '(unassigned)';
   return [
     `# Task ${task.id} Plan`,
     '',
     `Task: ${task.title}`,
-    `Goal: ${goalLabel}`,
+    `Project: ${projectLabel}`,
     `Status: ${task.status}`,
     '',
     '## Objective',
@@ -108,18 +106,20 @@ export function getTaskPlanContent(task: Task): string {
   return content.trim() ? content : normalizeTaskPlan(task, task.plan);
 }
 
-function normalizeStatusForApproval(task: Task, requested: TaskStatus): TaskStatus {
-  if ((requested === 'in_progress' || requested === 'done') && !task.approvedAt) {
-    return 'planned';
-  }
-  return requested;
-}
+
+// migrate legacy statuses from older data
+const STATUS_MIGRATION: Record<string, TaskStatus> = {
+  planning: 'todo',
+  planned: 'todo',
+  rework: 'in_progress',
+};
 
 function parseTaskRow(raw: string): Task {
   const task = JSON.parse(raw) as Task;
+  const rawStatus = (task.status || 'todo') as string;
   return {
     ...task,
-    status: task.status || 'planning',
+    status: (STATUS_MIGRATION[rawStatus] || rawStatus) as TaskStatus,
     planDocPath: task.planDocPath || getTaskPlanPath(task.id),
   };
 }
@@ -191,29 +191,18 @@ export function readTaskLogs(taskId: string, limit = 50): Array<{
   }));
 }
 
-function derivedState(task: Task): string {
-  if (task.status === 'planned') {
-    if (task.approvalRequestId) return 'needs_approval';
-    if (task.reason && /denied/i.test(task.reason)) return 'denied';
-    if (task.approvedAt) return 'ready';
-  }
-  return task.status;
-}
-
 function taskSummary(task: Task): string {
-  const goal = task.goalId ? ` goal=${task.goalId}` : '';
-  const state = derivedState(task);
-  const extra = state !== task.status ? ` (${state})` : '';
-  return `#${task.id} [${task.status}${extra}]${goal} ${task.title}`;
+  const project = task.goalId ? ` project=${task.goalId}` : '';
+  return `#${task.id} [${task.status}]${project} ${task.title}`;
 }
 
 export const tasksViewTool = tool(
   'tasks_view',
-  'View tasks. Filter by status (raw), filter (derived state like needs_approval/ready/denied), goalId, or id.',
+  'View tasks. Filter by status, goalId, or id. Statuses: todo, in_progress, review, done, blocked, cancelled.',
   {
-    status: z.enum(['all', 'planning', 'planned', 'in_progress', 'done', 'blocked', 'cancelled']).optional(),
-    filter: z.enum(['needs_approval', 'ready', 'denied', 'running', 'active']).optional()
-      .describe('Derived state filter. needs_approval = awaiting human approval, ready = approved but not started, denied = plan was denied, running = in_progress, active = not done/cancelled/denied'),
+    status: z.enum(['all', 'todo', 'in_progress', 'review', 'done', 'blocked', 'cancelled']).optional(),
+    filter: z.enum(['running', 'active', 'review']).optional()
+      .describe('Quick filter. running = in_progress, review = needs human review, active = not done/cancelled'),
     goalId: z.string().optional(),
     id: z.string().optional(),
     includeLogs: z.boolean().optional(),
@@ -251,13 +240,10 @@ export const tasksViewTool = tool(
     if (args.filter) {
       const DISMISSED = new Set(['done', 'cancelled']);
       tasks = tasks.filter(t => {
-        const ds = derivedState(t);
         switch (args.filter) {
-          case 'needs_approval': return ds === 'needs_approval';
-          case 'ready': return ds === 'ready';
-          case 'denied': return ds === 'denied';
           case 'running': return t.status === 'in_progress';
-          case 'active': return !DISMISSED.has(t.status) && ds !== 'denied';
+          case 'review': return t.status === 'review';
+          case 'active': return !DISMISSED.has(t.status);
           default: return true;
         }
       });
@@ -281,7 +267,7 @@ export const tasksAddTool = tool(
   {
     title: z.string(),
     goalId: z.string().optional(),
-    status: z.enum(['planning', 'planned', 'in_progress', 'done', 'blocked', 'cancelled']).optional(),
+    status: z.enum(['todo', 'in_progress', 'review', 'done', 'blocked', 'cancelled']).optional(),
     plan: z.string().optional(),
     reason: z.string().optional(),
   },
@@ -289,14 +275,7 @@ export const tasksAddTool = tool(
     const state = loadTasks();
     const now = new Date().toISOString();
     const id = nextId(state.tasks);
-    const requestedStatus = args.status || 'planning';
-    // require a plan to mark as planned
-    if (requestedStatus === 'planned' && !args.plan?.trim()) {
-      return { content: [{ type: 'text', text: 'Cannot set status to planned without a plan. Write a detailed plan first.' }] };
-    }
-    const status = requestedStatus === 'in_progress' || requestedStatus === 'done'
-      ? 'planned'
-      : requestedStatus;
+    const status = args.status || 'todo';
     const task: Task = {
       id,
       goalId: args.goalId,
@@ -325,7 +304,7 @@ export const tasksUpdateTool = tool(
     id: z.string(),
     title: z.string().optional(),
     goalId: z.string().nullable().optional(),
-    status: z.enum(['planning', 'planned', 'in_progress', 'done', 'blocked', 'cancelled']).optional(),
+    status: z.enum(['todo', 'in_progress', 'review', 'done', 'blocked', 'cancelled']).optional(),
     plan: z.string().optional(),
     result: z.string().optional(),
     reason: z.string().optional(),
@@ -337,14 +316,9 @@ export const tasksUpdateTool = tool(
     const task = state.tasks.find(t => t.id === args.id);
     if (!task) return { content: [{ type: 'text', text: `Task #${args.id} not found` }], isError: true };
 
-    // require a plan to transition to planned
-    if (args.status === 'planned' && !args.plan?.trim() && !task.plan?.trim()) {
-      return { content: [{ type: 'text', text: 'Cannot set status to planned without a plan. Write a detailed plan first.' }] };
-    }
-
     if (args.title !== undefined) task.title = args.title;
     if (args.goalId !== undefined) task.goalId = args.goalId || undefined;
-    if (args.status !== undefined) task.status = normalizeStatusForApproval(task, args.status);
+    if (args.status !== undefined) task.status = args.status;
     if (args.plan !== undefined) {
       writeTaskPlanDoc(task, args.plan);
     } else {
@@ -358,7 +332,6 @@ export const tasksUpdateTool = tool(
     task.updatedAt = new Date().toISOString();
     if (task.status === 'done' && !task.completedAt) task.completedAt = task.updatedAt;
     if (task.status !== 'done') task.completedAt = undefined;
-    if (task.status !== 'planned') task.approvalRequestId = undefined;
     saveTasks(state);
 
     const changes: string[] = [];
@@ -381,16 +354,6 @@ export const tasksDoneTool = tool(
     const task = state.tasks.find(t => t.id === args.id);
     if (!task) return { content: [{ type: 'text', text: `Task #${args.id} not found` }], isError: true };
     const now = new Date().toISOString();
-
-    if (!task.approvedAt) {
-      task.status = 'planned';
-      if (args.result !== undefined) task.result = args.result;
-      task.updatedAt = now;
-      task.completedAt = undefined;
-      saveTasks(state);
-      appendTaskLog(task.id, 'task_done_blocked', 'Task attempted done before approval, moved to planned');
-      return { content: [{ type: 'text', text: `Task #${task.id} moved to planned for human approval` }] };
-    }
 
     task.status = 'done';
     if (args.result !== undefined) task.result = args.result;
