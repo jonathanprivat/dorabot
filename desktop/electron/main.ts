@@ -87,8 +87,7 @@ function setupAutoUpdater(): void {
 
   ipcMain.on('update-install', () => {
     isQuitting = true;
-    app.relaunch();
-    app.quit();
+    autoUpdater.quitAndInstall();
   });
 
   // Check for updates 10s after launch, then every 4 hours

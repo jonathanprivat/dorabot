@@ -61,7 +61,7 @@ jobs:
           npx electron-builder --mac --arm64 --publish always
         working-directory: desktop
 
-      - name: Publish release with notes
+      - name: Add release notes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -72,7 +72,7 @@ jobs:
           else
             NOTES=$(git log --oneline --no-merges -20)
           fi
-          gh release edit "$TAG" --draft=false --notes "$NOTES" --repo "$GITHUB_REPOSITORY" 2>/dev/null || true
+          gh release edit "$TAG" --notes "$NOTES" --repo "$GITHUB_REPOSITORY" 2>/dev/null || true
 
       - name: Upload DMG
         uses: actions/upload-artifact@v4
