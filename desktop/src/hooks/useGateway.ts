@@ -724,7 +724,7 @@ export function useGateway() {
             const state = prev[sk];
             if (!state) return prev;
             const last = state.chatItems[state.chatItems.length - 1];
-            const isMarkedRunSource = d.source.startsWith('tasks/') || d.source.startsWith('calendar/');
+            const isMarkedRunSource = d.source?.startsWith('tasks/') || d.source?.startsWith('calendar/');
             if (isMarkedRunSource && last?.type === 'user' && last.content === d.prompt) {
               return prev;
             }
