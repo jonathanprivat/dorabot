@@ -12,6 +12,7 @@ type Props = {
   rpc: (method: string, params?: Record<string, unknown>) => Promise<unknown>;
   onShellEvent?: (listener: (data: { shellId: string; type: string; data?: string }) => void) => () => void;
   palette?: Palette;
+  focused?: boolean;
 };
 
 function getTerminalTheme(palette?: Palette) {
@@ -23,7 +24,7 @@ function getTerminalTheme(palette?: Palette) {
   return getPalette(p).terminal;
 }
 
-export function TerminalView({ shellId, cwd, rpc, onShellEvent, palette }: Props) {
+export function TerminalView({ shellId, cwd, rpc, onShellEvent, palette, focused }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -83,6 +84,15 @@ export function TerminalView({ shellId, cwd, rpc, onShellEvent, palette }: Props
       terminalRef.current.options.theme = getTerminalTheme(palette);
     }
   }, [palette]);
+
+  // Re-fit when tab becomes focused (visibility: hidden -> visible won't trigger ResizeObserver)
+  useEffect(() => {
+    if (focused && fitAddonRef.current) {
+      requestAnimationFrame(() => {
+        try { fitAddonRef.current?.fit(); } catch { /* ignore */ }
+      });
+    }
+  }, [focused]);
 
   // Spawn shell and wire up I/O
   useEffect(() => {

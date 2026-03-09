@@ -116,15 +116,7 @@ export function EditorGroupPanel({
           />
         );
       case 'terminal':
-        return (
-          <TerminalView
-            shellId={activeTab.shellId}
-            cwd={activeTab.cwd}
-            rpc={gateway.rpc}
-            onShellEvent={gateway.onShellEvent}
-            palette={palette}
-          />
-        );
+        return null; // Terminals are rendered persistently below to preserve buffer
       case 'chat': {
         const ss = gateway.sessionStates[activeTab.sessionKey] || {
           chatItems: [],
@@ -210,10 +202,30 @@ export function EditorGroupPanel({
         onCloseTabsToRight={(tabId, groupId) => tabState.closeTabsToRight(tabId, groupId as any)}
         onSplitRight={onSplitRight}
         onSplitDown={onSplitDown}
+        onRenameTab={(tabId, label) => tabState.updateTabLabel(tabId, label)}
       />
       <div className="@container flex-1 min-h-0 min-w-0 relative">
         <ErrorBoundary>
-          {renderContent()}
+          <div className="relative z-10" style={{ display: activeTab && !isTerminalTab(activeTab) ? 'contents' : 'none' }}>
+            {renderContent()}
+          </div>
+          {/* Keep all terminal tabs mounted so xterm preserves its buffer */}
+          {groupTabs.filter(isTerminalTab).map(t => (
+            <div
+              key={t.id}
+              className="absolute inset-0"
+              style={{ visibility: t.id === activeTab?.id ? 'visible' : 'hidden', zIndex: t.id === activeTab?.id ? 1 : 0 }}
+            >
+              <TerminalView
+                shellId={t.shellId}
+                cwd={t.cwd}
+                rpc={gateway.rpc}
+                onShellEvent={gateway.onShellEvent}
+                palette={palette}
+                focused={t.id === activeTab?.id}
+              />
+            </div>
+          ))}
         </ErrorBoundary>
         {isDragging && (
           <>
