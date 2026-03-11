@@ -339,9 +339,31 @@ function sessionMessagesToChatItems(messages: SessionMessage[]): ChatItem[] {
           }
         }
       } else if (activeTaskIds.size > 0) {
-        // Subagent prompt or intermediate user message — skip from top-level
-        continue;
-      } else {
+        // Check: if this user message has NO parent_tool_use_id, it's a real top-level
+        // user message, meaning any open subagent scopes are orphans (e.g. subagent was
+        // interrupted and never produced a tool_result). Close them so subsequent
+        // messages aren't swallowed.
+        if (!parentToolUseId) {
+          for (const orphanId of activeTaskIds) {
+            const subs = taskSubItems.get(orphanId) || [];
+            taskSubItems.delete(orphanId);
+            for (let i = items.length - 1; i >= 0; i--) {
+              const it = items[i];
+              if (it.type === 'tool_use' && it.id === orphanId) {
+                items[i] = { ...it, output: '(interrupted)', is_error: false, subItems: subs.length > 0 ? subs : undefined };
+                break;
+              }
+            }
+          }
+          activeTaskIds.clear();
+          // fall through to render this as a real user message
+        } else {
+          // Subagent prompt or intermediate user message — skip from top-level
+          continue;
+        }
+      }
+      // real user message (or recovered after orphan cleanup)
+      {
         // real user message
         let text = '';
         let images: ImageAttachment[] | undefined;
@@ -367,9 +389,10 @@ function sessionMessagesToChatItems(messages: SessionMessage[]): ChatItem[] {
     if (msg.type === 'assistant') {
       const assistantMsg = (c as any).message;
       const blocks = assistantMsg?.content;
+      const isSubagentAssistant = !!(c as any).parent_tool_use_id;
 
-      // If we're inside a Task scope, route blocks into subItems
-      if (activeTaskIds.size > 0) {
+      // If we're inside a Task scope and this is a subagent message, route into subItems
+      if (activeTaskIds.size > 0 && isSubagentAssistant) {
         const taskId = [...activeTaskIds].at(-1)!;
         const subs = taskSubItems.get(taskId) || [];
         if (Array.isArray(blocks)) {
@@ -389,6 +412,23 @@ function sessionMessagesToChatItems(messages: SessionMessage[]): ChatItem[] {
         }
         taskSubItems.set(taskId, subs);
         continue;
+      }
+
+      // Top-level assistant message while subagent scope is open = orphan scope.
+      // Close all open scopes so this message renders properly.
+      if (activeTaskIds.size > 0 && !isSubagentAssistant) {
+        for (const orphanId of activeTaskIds) {
+          const subs = taskSubItems.get(orphanId) || [];
+          taskSubItems.delete(orphanId);
+          for (let i = items.length - 1; i >= 0; i--) {
+            const it = items[i];
+            if (it.type === 'tool_use' && it.id === orphanId) {
+              items[i] = { ...it, output: '(interrupted)', is_error: false, subItems: subs.length > 0 ? subs : undefined };
+              break;
+            }
+          }
+        }
+        activeTaskIds.clear();
       }
 
       if (Array.isArray(blocks)) {
