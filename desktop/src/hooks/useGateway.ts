@@ -46,11 +46,22 @@ function applyStreamEvent(items: ChatItem[], evt: Record<string, unknown>): Chat
     const delta = evt.delta as Record<string, unknown>;
     if (!delta) return items;
     if (delta.type === 'text_delta' && typeof delta.text === 'string') {
+      // first try streaming items, then fall back to last text item (handles late deltas after agent.result)
+      let target = -1;
       for (let i = items.length - 1; i >= 0; i--) {
         const it = items[i];
-        if (it.type === 'text' && it.streaming) {
+        if (it.type === 'text' && it.streaming) { target = i; break; }
+      }
+      if (target < 0) {
+        for (let i = items.length - 1; i >= 0; i--) {
+          if (items[i].type === 'text') { target = i; break; }
+        }
+      }
+      if (target >= 0) {
+        const it = items[target];
+        if (it.type === 'text') {
           const u = [...items];
-          u[i] = { ...it, content: it.content + (delta.text as string) };
+          u[target] = { ...it, content: it.content + (delta.text as string) };
           return u;
         }
       }
