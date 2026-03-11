@@ -36,7 +36,7 @@ mac:
   category: public.app-category.developer-tools
   icon: build/icon.icns
   target:
-    - target: dmg
+    - target: dir
       arch:
         - arm64
     - target: zip
