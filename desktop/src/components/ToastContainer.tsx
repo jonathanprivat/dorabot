@@ -24,7 +24,7 @@ export function ToastContainer() {
             )}
           >
             <Icon className="h-3.5 w-3.5 shrink-0" />
-            <span className="flex-1 break-words max-w-[260px]">{t.message}</span>
+            <span className="flex-1 break-words max-w-[360px] whitespace-pre-wrap">{t.message}</span>
             <button onClick={() => dismissToast(t.id)} className="shrink-0 opacity-50 hover:opacity-100">
               <X className="h-3 w-3" />
             </button>

@@ -4565,8 +4565,10 @@ export async function startGateway(opts: GatewayOptions): Promise<Gateway> {
               cwd: resolved, encoding: 'utf-8', timeout: 30000,
             });
             return { id, result: { fetched: true } };
-          } catch (err) {
-            return { id, error: err instanceof Error ? err.message : String(err) };
+          } catch (err: any) {
+            const stderr = typeof err?.stderr === 'string' ? err.stderr.trim() : '';
+            const msg = stderr || (err instanceof Error ? err.message : String(err));
+            return { id, error: msg };
           }
         }
 
@@ -4580,8 +4582,10 @@ export async function startGateway(opts: GatewayOptions): Promise<Gateway> {
               cwd: resolved, encoding: 'utf-8', timeout: 30000,
             }).trim();
             return { id, result: { output } };
-          } catch (err) {
-            return { id, error: err instanceof Error ? err.message : String(err) };
+          } catch (err: any) {
+            const stderr = typeof err?.stderr === 'string' ? err.stderr.trim() : '';
+            const msg = stderr || (err instanceof Error ? err.message : String(err));
+            return { id, error: msg };
           }
         }
 
@@ -4595,8 +4599,10 @@ export async function startGateway(opts: GatewayOptions): Promise<Gateway> {
               cwd: resolved, encoding: 'utf-8', timeout: 30000,
             }).trim();
             return { id, result: { output } };
-          } catch (err) {
-            return { id, error: err instanceof Error ? err.message : String(err) };
+          } catch (err: any) {
+            const stderr = typeof err?.stderr === 'string' ? err.stderr.trim() : '';
+            const msg = stderr || (err instanceof Error ? err.message : String(err));
+            return { id, error: msg };
           }
         }
 
