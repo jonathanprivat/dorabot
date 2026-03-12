@@ -1235,6 +1235,10 @@ export default function App() {
         rpc={gw.rpc}
         viewRoot={fileExplorerStateRef.current.viewRoot || ''}
         onOpenFile={(path) => { tabState.openFileTab(path); setShowGlobalSearch(false); }}
+        onOpenSession={(sessionId, channel, chatId) => {
+          handleViewSession(sessionId, channel || undefined, chatId || undefined);
+          setShowGlobalSearch(false);
+        }}
       />
 
       {/* titlebar — pure drag chrome */}

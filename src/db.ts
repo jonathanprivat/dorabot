@@ -197,31 +197,56 @@ export function indexMessageForSearch(messageRowId: number, content: string, typ
   d.prepare('INSERT INTO messages_fts(rowid, text_content) VALUES (?, ?)').run(messageRowId, text);
 }
 
-// backfill FTS index from existing messages (run once on upgrade)
+// backfill FTS index from existing messages (run once on upgrade, then incremental)
 export function backfillFtsIndex(): void {
   const d = getDb();
 
   // check if already backfilled (with actual content, not empty rows from a broken build)
   const sample = d.prepare("SELECT text_content FROM messages_fts LIMIT 1").get() as { text_content: string | null } | undefined;
-  if (sample?.text_content) return;
+  if (!sample?.text_content) {
+    // drop and recreate to clear empty rows from previous broken backfill
+    d.exec('DROP TABLE IF EXISTS messages_fts');
+    d.exec("CREATE VIRTUAL TABLE messages_fts USING fts5(text_content, content='', tokenize='porter unicode61')");
 
-  // drop and recreate to clear empty rows from previous broken backfill
-  d.exec('DROP TABLE IF EXISTS messages_fts');
-  d.exec("CREATE VIRTUAL TABLE messages_fts USING fts5(text_content, content='', tokenize='porter unicode61')");
+    console.error('[db] backfilling FTS index...');
+    const rows = d.prepare('SELECT id, content, type FROM messages WHERE type IN (\'user\', \'assistant\', \'result\') ORDER BY id').all() as { id: number; content: string; type: string }[];
 
-  console.error('[db] backfilling FTS index...');
-  const rows = d.prepare('SELECT id, content, type FROM messages WHERE type IN (\'user\', \'assistant\', \'result\') ORDER BY id').all() as { id: number; content: string; type: string }[];
+    const insert = d.prepare('INSERT INTO messages_fts(rowid, text_content) VALUES (?, ?)');
+    const tx = d.transaction(() => {
+      let indexed = 0;
+      for (const row of rows) {
+        const text = extractMessageText(row.content);
+        if (!text || text.length < 5) continue;
+        insert.run(row.id, text);
+        indexed++;
+      }
+      console.error(`[db] FTS backfill complete: ${indexed}/${rows.length} messages indexed`);
+    });
+    tx();
+    return;
+  }
 
+  // incremental: index any messages missing from FTS
+  const missing = d.prepare(`
+    SELECT m.id, m.content, m.type FROM messages m
+    WHERE m.type IN ('user', 'assistant', 'result')
+      AND m.id NOT IN (SELECT rowid FROM messages_fts)
+    ORDER BY m.id
+  `).all() as { id: number; content: string; type: string }[];
+
+  if (missing.length === 0) return;
+
+  console.error(`[db] incremental FTS backfill: ${missing.length} messages to index...`);
   const insert = d.prepare('INSERT INTO messages_fts(rowid, text_content) VALUES (?, ?)');
   const tx = d.transaction(() => {
     let indexed = 0;
-    for (const row of rows) {
+    for (const row of missing) {
       const text = extractMessageText(row.content);
       if (!text || text.length < 5) continue;
       insert.run(row.id, text);
       indexed++;
     }
-    console.error(`[db] FTS backfill complete: ${indexed}/${rows.length} messages indexed`);
+    console.error(`[db] incremental FTS backfill complete: ${indexed}/${missing.length} messages indexed`);
   });
   tx();
 }

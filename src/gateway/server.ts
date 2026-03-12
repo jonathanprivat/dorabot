@@ -5134,38 +5134,144 @@ export async function startGateway(opts: GatewayOptions): Promise<Gateway> {
           return { id, result: Array.from(backgroundRuns.values()) };
         }
 
-        case 'search.ripgrep': {
+        case 'search.memory': {
+          const query = params?.query as string;
+          const limit = Math.min((params?.limit as number) || 20, 50);
+          const channel = params?.channel as string | undefined;
+          const type = params?.type as string | undefined;
+          if (!query) return { id, error: 'query required' };
+          try {
+            const { getDb, extractMessageText } = await import('../db.js');
+            const db = getDb();
+
+            let sql = `
+              SELECT
+                m.id,
+                m.session_id,
+                m.type,
+                m.timestamp,
+                m.content,
+                s.channel,
+                s.chat_id,
+                s.sender_name,
+                s.created_at as session_created_at,
+                f.rank
+              FROM messages_fts f
+              JOIN messages m ON m.id = f.rowid
+              LEFT JOIN sessions s ON s.id = m.session_id
+              WHERE messages_fts MATCH ?
+            `;
+            const sqlParams: unknown[] = [query];
+
+            if (channel) {
+              sql += ' AND s.channel = ?';
+              sqlParams.push(channel);
+            }
+            if (type) {
+              sql += ' AND m.type = ?';
+              sqlParams.push(type);
+            }
+
+            sql += ' ORDER BY f.rank LIMIT ?';
+            sqlParams.push(limit);
+
+            const rows = db.prepare(sql).all(...sqlParams) as {
+              id: number;
+              session_id: string;
+              type: string;
+              timestamp: string;
+              content: string;
+              channel: string | null;
+              chat_id: string | null;
+              sender_name: string | null;
+              session_created_at: string | null;
+              rank: number;
+            }[];
+
+            const results = rows.map(row => {
+              const text = extractMessageText(row.content);
+              const preview = text.length > 300 ? text.slice(0, 300) + '...' : text;
+              return {
+                id: row.id,
+                sessionId: row.session_id,
+                type: row.type,
+                timestamp: row.timestamp,
+                channel: row.channel,
+                chatId: row.chat_id,
+                senderName: row.sender_name,
+                sessionCreatedAt: row.session_created_at,
+                preview,
+                rank: row.rank,
+              };
+            });
+
+            return { id, result: { results } };
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            if (msg.includes('fts5: syntax error')) {
+              return { id, error: 'Search syntax error. Try simpler keywords or quote exact phrases.' };
+            }
+            return { id, error: msg };
+          }
+        }
+
+        case 'search.ripgrep':
+        case 'search.files': {
           const searchPath = params?.path as string;
           const query = params?.query as string;
           const maxResults = (params?.maxResults as number) || 100;
           if (!searchPath || !query) return { id, error: 'path and query required' };
           try {
-            const { execFileSync } = await import('node:child_process');
-            const { createRequire } = await import('node:module');
-            const { join, dirname } = await import('node:path');
-            const { arch, platform } = await import('node:process');
-            const require = createRequire(import.meta.url);
-            const sdkDir = dirname(require.resolve('@anthropic-ai/claude-agent-sdk/package.json'));
-            const rgBin = join(sdkDir, 'vendor', 'ripgrep', `${arch}-${platform}`, 'rg');
-            const args = ['--json', '--max-count', '3', '-m', String(maxResults), '-i', query, resolve(searchPath)];
-            const raw = execFileSync(rgBin, args, { encoding: 'utf-8', timeout: 10000, maxBuffer: 5 * 1024 * 1024 });
-            const results: { path: string; line: number; text: string }[] = [];
-            for (const line of raw.split('\n')) {
-              if (!line) continue;
-              try {
-                const obj = JSON.parse(line);
-                if (obj.type === 'match') {
-                  results.push({
-                    path: obj.data.path.text,
-                    line: obj.data.line_number,
-                    text: obj.data.lines.text.trim(),
-                  });
+            const { readdir, readFile } = await import('node:fs/promises');
+            const { join: pathJoin } = await import('node:path');
+
+            // recursively collect text files (skip hidden dirs, node_modules, .git, binaries)
+            const SKIP_DIRS = new Set(['.git', 'node_modules', '.next', 'dist', '__pycache__', '.venv', '.dorabot']);
+            const TEXT_EXTS = new Set([
+              '.ts', '.tsx', '.js', '.jsx', '.json', '.md', '.txt', '.css', '.scss',
+              '.html', '.yaml', '.yml', '.toml', '.py', '.rs', '.go', '.sh', '.sql',
+              '.env', '.cfg', '.ini', '.csv', '.xml', '.svg', '.graphql', '.prisma',
+            ]);
+
+            const files: string[] = [];
+            const walk = async (dir: string, depth = 0) => {
+              if (depth > 10 || files.length > 5000) return;
+              let entries;
+              try { entries = await readdir(dir, { withFileTypes: true }); } catch { return; }
+              for (const e of entries) {
+                if (e.name.startsWith('.') && SKIP_DIRS.has(e.name)) continue;
+                const full = pathJoin(dir, e.name);
+                if (e.isDirectory()) {
+                  if (SKIP_DIRS.has(e.name)) continue;
+                  await walk(full, depth + 1);
+                } else if (e.isFile()) {
+                  const ext = e.name.includes('.') ? '.' + e.name.split('.').pop()!.toLowerCase() : '';
+                  if (TEXT_EXTS.has(ext) || !ext) files.push(full);
                 }
-              } catch { continue; }
+              }
+            };
+            await walk(resolve(searchPath));
+
+            const results: { path: string; line: number; text: string }[] = [];
+            const re = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+            const maxPerFile = 3;
+
+            for (const filePath of files) {
+              if (results.length >= maxResults) break;
+              let content: string;
+              try { content = await readFile(filePath, 'utf-8'); } catch { continue; }
+              const lines = content.split('\n');
+              let fileMatches = 0;
+              for (let i = 0; i < lines.length && fileMatches < maxPerFile; i++) {
+                if (re.test(lines[i])) {
+                  results.push({ path: filePath, line: i + 1, text: lines[i].trim().slice(0, 200) });
+                  fileMatches++;
+                }
+              }
             }
+
             return { id, result: { results } };
           } catch (err) {
-            if ((err as any)?.status === 1) return { id, result: { results: [] } };
             return { id, error: err instanceof Error ? err.message : String(err) };
           }
         }
