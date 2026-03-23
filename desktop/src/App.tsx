@@ -841,8 +841,8 @@ export default function App() {
       }
     },
     abortAgent: () => gw.abortAgent(),
-    splitHorizontal: () => layout.splitHorizontal(),
-    splitVertical: () => layout.splitVertical(),
+    splitHorizontal: () => layout.addColumn(),
+    splitVertical: () => layout.addRow(),
     splitGrid: () => layout.splitGrid(),
     resetLayout: () => layout.resetToSingle(),
     focusGroupLeft: () => { focusInputOnGroupSwitch.current = true; layout.focusGroupDirection('left'); },
@@ -883,7 +883,7 @@ export default function App() {
     if (!over) return;
 
     const tabId = active.data.current?.tabId as string;
-    const sourceGroupId = active.data.current?.sourceGroupId as GroupId | undefined;
+    const sourceGroupId = active.data.current?.sourceGroupId as string | undefined;
     if (!tabId) return;
 
     const overId = over.id as string;
@@ -898,7 +898,7 @@ export default function App() {
 
     // Dropped on a group's tab bar — move tab to that group
     if (overId.startsWith('group-drop:')) {
-      const targetGroupId = over.data.current?.groupId as GroupId;
+      const targetGroupId = over.data.current?.groupId as string;
       if (sourceGroupId && targetGroupId && sourceGroupId !== targetGroupId) {
         layout.moveTabToGroup(tabId, sourceGroupId, targetGroupId);
         syncAfterMove(tabId);
@@ -908,46 +908,28 @@ export default function App() {
 
     // Dropped on a panel drop zone — split or move
     if (overId.startsWith('panel-split:')) {
-      const targetGroupId = over.data.current?.panelGroupId as GroupId;
+      const targetPaneId = over.data.current?.panelGroupId as string;
       const zone = over.data.current?.splitZone as string;
-      if (!sourceGroupId || !targetGroupId || !zone) return;
+      if (!sourceGroupId || !targetPaneId || !zone) return;
 
-      // Center zone = move tab to this group (no split)
+      // Center zone = move tab to this pane (no split)
       if (zone === 'center') {
-        if (sourceGroupId !== targetGroupId) {
-          layout.moveTabToGroup(tabId, sourceGroupId, targetGroupId);
+        if (sourceGroupId !== targetPaneId) {
+          layout.moveTabToGroup(tabId, sourceGroupId, targetPaneId);
           syncAfterMove(tabId);
         }
         return;
       }
 
-      // Edge zones = split in that direction, move tab to new group
+      // Edge zones: create a new pane via column/row insertion, then move tab
+      let newPaneId: string;
       if (zone === 'left' || zone === 'right') {
-        layout.splitHorizontal();
-        // After split, determine which group the tab should end up in
-        // splitHorizontal: single→2-col (g0,g1), 2-row→2x2 (g0,g1,g2,g3)
-        const newGroupId = layout.mode === 'single'
-          ? (zone === 'right' ? 'g1' : 'g0') as GroupId
-          : layout.mode === '2-row'
-            ? (targetGroupId === 'g0'
-              ? (zone === 'right' ? 'g1' : 'g0')
-              : (zone === 'right' ? 'g3' : 'g2')) as GroupId
-            : targetGroupId; // already 2-col or 2x2, can't split further
-        if (newGroupId !== sourceGroupId) {
-          setTimeout(() => layout.moveTabToGroup(tabId, sourceGroupId, newGroupId), 0);
-        }
+        newPaneId = layout.addColumnAt(targetPaneId, zone as 'left' | 'right');
       } else {
-        layout.splitVertical();
-        const newGroupId = layout.mode === 'single'
-          ? (zone === 'bottom' ? 'g1' : 'g0') as GroupId
-          : layout.mode === '2-col'
-            ? (targetGroupId === 'g0'
-              ? (zone === 'bottom' ? 'g2' : 'g0')
-              : (zone === 'bottom' ? 'g3' : 'g1')) as GroupId
-            : targetGroupId;
-        if (newGroupId !== sourceGroupId) {
-          setTimeout(() => layout.moveTabToGroup(tabId, sourceGroupId, newGroupId), 0);
-        }
+        newPaneId = layout.addRowAt(targetPaneId, zone as 'top' | 'bottom');
+      }
+      if (newPaneId && newPaneId !== sourceGroupId) {
+        setTimeout(() => layout.moveTabToGroup(tabId, sourceGroupId, newPaneId), 0);
       }
       return;
     }
@@ -1004,109 +986,68 @@ export default function App() {
       tabState.openTerminalTab(undefined, groupId);
     },
     onNavClick: (navId: string) => handleNavClick(navId as TabType),
-    onSplitRight: layout.splitHorizontal,
-    onSplitDown: layout.splitVertical,
+    onSplitRight: () => layout.addColumnAt(groupId, 'right'),
+    onSplitDown: () => layout.addRowAt(groupId, 'bottom'),
   }), [tabState, gw, selectedChannel, layout, handleNavClick, handleViewSession, draggingTab]);
 
   const renderLayout = () => {
-    const { visibleGroups, mode, activeGroupId } = layout;
+    const { columns, columnSizes, activeGroupId } = layout;
 
-    if (mode === 'single') {
+    // Single pane: no resizable wrapper needed
+    if (columns.length === 1 && columns[0].panes.length === 1) {
+      const pane = columns[0].panes[0];
       return (
         <EditorGroupPanel
-          group={visibleGroups[0]}
+          group={pane}
           isActive={true}
-          {...groupPanelProps(visibleGroups[0].id)}
+          {...groupPanelProps(pane.id)}
         />
       );
     }
 
-    if (mode === '2-col') {
+    const renderColumn = (col: typeof columns[0]) => {
+      if (col.panes.length === 1) {
+        const pane = col.panes[0];
+        return (
+          <EditorGroupPanel
+            group={pane}
+            isActive={activeGroupId === pane.id}
+            {...groupPanelProps(pane.id)}
+          />
+        );
+      }
       return (
-        <ResizablePanelGroup key="2-col" orientation="horizontal" className="h-full">
-          <ResizablePanel defaultSize="50%" minSize="20%">
-            <EditorGroupPanel
-              group={visibleGroups[0]}
-              isActive={activeGroupId === visibleGroups[0].id}
-              {...groupPanelProps(visibleGroups[0].id)}
-            />
-          </ResizablePanel>
-          <ResizableHandle withHandle />
-          <ResizablePanel defaultSize="50%" minSize="20%">
-            <EditorGroupPanel
-              group={visibleGroups[1]}
-              isActive={activeGroupId === visibleGroups[1].id}
-              {...groupPanelProps(visibleGroups[1].id)}
-            />
-          </ResizablePanel>
+        <ResizablePanelGroup orientation="vertical" key={col.id}>
+          {col.panes.map((pane, pi) => (
+            <ResizablePanel key={pane.id} defaultSize={`${col.sizes[pi]}%`} minSize="10%">
+              <EditorGroupPanel
+                group={pane}
+                isActive={activeGroupId === pane.id}
+                {...groupPanelProps(pane.id)}
+              />
+            </ResizablePanel>
+          )).flatMap((el, i, arr) =>
+            i < arr.length - 1 ? [el, <ResizableHandle key={`h-${col.id}-${i}`} withHandle />] : [el]
+          )}
         </ResizablePanelGroup>
       );
+    };
+
+    // Single column with multiple rows
+    if (columns.length === 1) {
+      return renderColumn(columns[0]);
     }
 
-    if (mode === '2-row') {
-      return (
-        <ResizablePanelGroup key="2-row" orientation="vertical" className="h-full">
-          <ResizablePanel defaultSize="50%" minSize="20%">
-            <EditorGroupPanel
-              group={visibleGroups[0]}
-              isActive={activeGroupId === visibleGroups[0].id}
-              {...groupPanelProps(visibleGroups[0].id)}
-            />
-          </ResizablePanel>
-          <ResizableHandle withHandle />
-          <ResizablePanel defaultSize="50%" minSize="20%">
-            <EditorGroupPanel
-              group={visibleGroups[1]}
-              isActive={activeGroupId === visibleGroups[1].id}
-              {...groupPanelProps(visibleGroups[1].id)}
-            />
-          </ResizablePanel>
-        </ResizablePanelGroup>
-      );
-    }
-
-    // 2x2
+    // Multiple columns
     return (
-      <ResizablePanelGroup key="2x2" orientation="horizontal" className="h-full">
-        <ResizablePanel defaultSize="50%" minSize="20%">
-          <ResizablePanelGroup orientation="vertical">
-            <ResizablePanel defaultSize="50%" minSize="20%">
-              <EditorGroupPanel
-                group={visibleGroups[0]}
-                isActive={activeGroupId === visibleGroups[0].id}
-                {...groupPanelProps(visibleGroups[0].id)}
-              />
-            </ResizablePanel>
-            <ResizableHandle withHandle />
-            <ResizablePanel defaultSize="50%" minSize="20%">
-              <EditorGroupPanel
-                group={visibleGroups[2]}
-                isActive={activeGroupId === visibleGroups[2].id}
-                {...groupPanelProps(visibleGroups[2].id)}
-              />
-            </ResizablePanel>
-          </ResizablePanelGroup>
-        </ResizablePanel>
-        <ResizableHandle withHandle />
-        <ResizablePanel defaultSize="50%" minSize="20%">
-          <ResizablePanelGroup orientation="vertical">
-            <ResizablePanel defaultSize="50%" minSize="20%">
-              <EditorGroupPanel
-                group={visibleGroups[1]}
-                isActive={activeGroupId === visibleGroups[1].id}
-                {...groupPanelProps(visibleGroups[1].id)}
-              />
-            </ResizablePanel>
-            <ResizableHandle withHandle />
-            <ResizablePanel defaultSize="50%" minSize="20%">
-              <EditorGroupPanel
-                group={visibleGroups[3]}
-                isActive={activeGroupId === visibleGroups[3].id}
-                {...groupPanelProps(visibleGroups[3].id)}
-              />
-            </ResizablePanel>
-          </ResizablePanelGroup>
-        </ResizablePanel>
+      <ResizablePanelGroup key={`cols-${columns.length}`} orientation="horizontal" className="h-full">
+        {columns.map((col, ci) => (
+          <ResizablePanel key={col.id} defaultSize={`${columnSizes[ci]}%`} minSize="10%">
+            {renderColumn(col)}
+          </ResizablePanel>
+        )).flatMap((el, i, arr) =>
+          i < arr.length - 1 ? [el, <ResizableHandle key={`hcol-${i}`} withHandle />] : [el]
+        )}
       </ResizablePanelGroup>
     );
   };
@@ -1330,7 +1271,7 @@ export default function App() {
       {/* main layout */}
       <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0">
         {/* sidebar */}
-        <ResizablePanel defaultSize="15%" minSize="10%" maxSize="25%" className="bg-card glass overflow-hidden">
+        <ResizablePanel defaultSize="12%" minSize="8%" maxSize="22%" className="bg-card glass overflow-hidden">
           <div className="flex flex-col h-full min-h-0">
             <div className="shrink-0 p-2">
               <div className="text-[10px] uppercase tracking-wider text-muted-foreground px-2.5 pt-3 pb-1">views</div>

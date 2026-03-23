@@ -1,4 +1,4 @@
-import type { EditorGroup, GroupId } from '../hooks/useLayout';
+import type { EditorGroup } from '../hooks/useLayout';
 import type { Tab } from '../hooks/useTabs';
 import { isChatTab, isFileTab, isDiffTab, isTerminalTab, isTaskTab } from '../hooks/useTabs';
 import type { useGateway } from '../hooks/useGateway';

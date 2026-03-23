@@ -26,8 +26,9 @@ export const SHORTCUTS = [
     { keys: 'Esc', desc: 'Stop agent' },
   ]},
   { section: 'Layout', items: [
-    { keys: '⌘D', desc: 'Split right' },
-    { keys: '⌘⇧D', desc: 'Split down' },
+    { keys: '⌘D', desc: 'Add column' },
+    { keys: '⌘⇧D', desc: 'Add row' },
+    { keys: '⌘G', desc: 'Grid (2\u00d72)' },
     { keys: '⌘⇧E', desc: 'Reset layout' },
     { keys: '⌘⇧Arrow', desc: 'Focus pane' },
   ]},

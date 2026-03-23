@@ -356,7 +356,7 @@ export function TabBar({ tabs, activeTabId, sessionStates, unreadBySession = {},
 
   const handleContextMenu = useCallback((e: React.MouseEvent, tabId: string) => {
     e.preventDefault();
-    setContextMenu({ x: e.clientX, y: e.clientY, tabId, groupId: groupId || 'g0' });
+    setContextMenu({ x: e.clientX, y: e.clientY, tabId, groupId: groupId || 'default' });
   }, [groupId]);
 
   const closeContextMenu = useCallback(() => setContextMenu(null), []);

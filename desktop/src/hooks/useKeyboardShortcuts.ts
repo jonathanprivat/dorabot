@@ -144,17 +144,24 @@ export function useKeyboardShortcuts(actions: ShortcutActions, options: Shortcut
         return;
       }
 
-      // Cmd+D — split right (side by side)
-      if (e.key === 'd' && !e.shiftKey) {
+      // Cmd+D — add column (side by side)
+      if (e.key.toLowerCase() === 'd' && !e.shiftKey) {
         e.preventDefault();
         actions.splitHorizontal();
         return;
       }
 
-      // Cmd+Shift+D — split down (stacked)
-      if (e.key === 'D' && e.shiftKey) {
+      // Cmd+Shift+D — add row (stacked)
+      if (e.key.toLowerCase() === 'd' && e.shiftKey) {
         e.preventDefault();
         actions.splitVertical();
+        return;
+      }
+
+      // Cmd+G — grid (2x2)
+      if (e.key === 'g' && !e.shiftKey) {
+        e.preventDefault();
+        actions.splitGrid();
         return;
       }
 

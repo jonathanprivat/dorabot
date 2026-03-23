@@ -1,7 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import type { useGateway } from './useGateway';
-import type { useLayout } from './useLayout';
-import type { GroupId } from './useLayout';
+import type { useLayout, GroupId } from './useLayout';
 
 export type TabType = 'chat' | 'channels' | 'goals' | 'automation' | 'extensions' | 'memory' | 'research' | 'settings' | 'file' | 'diff' | 'terminal' | 'task';
 
@@ -165,17 +164,16 @@ export function useTabs(gw: ReturnType<typeof useGateway>, layout: ReturnType<ty
     if (migratedRef.current) return;
     migratedRef.current = true;
 
-    const g0 = layout.groups[0];
+    const firstPane = layout.groups[0];
     const allGroupTabIds = layout.groups.flatMap(g => g.tabIds);
-    if (allGroupTabIds.length === 0 && tabs.length > 0) {
+    if (firstPane && allGroupTabIds.length === 0 && tabs.length > 0) {
       // Old state: tabs exist but no group assignments
       for (const tab of tabs) {
-        layout.addTabToGroup(tab.id, 'g0');
+        layout.addTabToGroup(tab.id, firstPane.id);
       }
-      // Set g0's active tab
       const active = tabs.find(t => t.id === activeTabId) || tabs[0];
       if (active) {
-        layout.setGroupActiveTab('g0', active.id);
+        layout.setGroupActiveTab(firstPane.id, active.id);
       }
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -317,7 +315,7 @@ export function useTabs(gw: ReturnType<typeof useGateway>, layout: ReturnType<ty
       gw.trackSession(fallback.sessionKey);
       gw.setActiveSession(fallback.sessionKey, fallback.chatId);
       if (layout.isMultiPane) layout.resetToSingle();
-      layout.addTabToGroup(fallback.id, 'g0');
+      layout.addTabToGroup(fallback.id, layout.groups[0]?.id);
       return;
     }
 
@@ -371,7 +369,7 @@ export function useTabs(gw: ReturnType<typeof useGateway>, layout: ReturnType<ty
 
   // Derive activeTab from the active group's activeTabId
   const activeGroup = layout.groups.find(g => g.id === layout.activeGroupId) || layout.groups[0];
-  const activeTab = tabs.find(t => t.id === (activeGroup.activeTabId || activeTabId)) || tabs[0];
+  const activeTab = tabs.find(t => t.id === (activeGroup?.activeTabId || activeTabId)) || tabs[0];
 
   const openTab = useCallback((tab: Tab, groupId?: GroupId) => {
     setTabs(prev => {
@@ -447,7 +445,7 @@ export function useTabs(gw: ReturnType<typeof useGateway>, layout: ReturnType<ty
       setTabs([fallback]);
       setActiveTabId(fallback.id);
       if (layout.isMultiPane) layout.resetToSingle();
-      layout.addTabToGroup(fallback.id, 'g0');
+      layout.addTabToGroup(fallback.id, layout.groups[0]?.id);
       return;
     }
 

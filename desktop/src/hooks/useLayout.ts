@@ -1,46 +1,159 @@
 import { useState, useCallback, useMemo, useEffect } from 'react';
 
-export type LayoutMode = 'single' | '2-col' | '2-row' | '2x2';
-export type GroupId = 'g0' | 'g1' | 'g2' | 'g3';
+// --- Types ---
 
-export type EditorGroup = {
-  id: GroupId;
+export type Pane = {
+  id: string;
   tabIds: string[];
   activeTabId: string | null;
 };
 
-export type LayoutState = {
-  mode: LayoutMode;
-  groups: EditorGroup[];
-  activeGroupId: GroupId;
+export type Column = {
+  id: string;
+  panes: Pane[];
+  sizes: number[];  // heights, sum to 100
 };
 
-const ALL_GROUP_IDS: GroupId[] = ['g0', 'g1', 'g2', 'g3'];
+export type LayoutState = {
+  columns: Column[];
+  sizes: number[];  // widths, sum to 100
+  activePaneId: string;
+};
+
+// Backwards compat: callers that used GroupId now use string
+export type GroupId = string;
+
+export type EditorGroup = Pane;
+
 const LAYOUT_STORAGE_KEY = 'dorabot:layout';
 
-function makeEmptyGroups(): EditorGroup[] {
-  return ALL_GROUP_IDS.map(id => ({ id, tabIds: [], activeTabId: null }));
+function uid(): string {
+  return crypto.randomUUID().slice(0, 8);
+}
+
+function makePane(): Pane {
+  return { id: uid(), tabIds: [], activeTabId: null };
+}
+
+function makeColumn(panes?: Pane[]): Column {
+  const p = panes || [makePane()];
+  return { id: uid(), panes: p, sizes: equalSizes(p.length) };
+}
+
+function equalSizes(n: number): number[] {
+  const base = Math.floor(100 / n);
+  const sizes = Array(n).fill(base);
+  sizes[0] += 100 - base * n; // absorb remainder
+  return sizes;
+}
+
+// --- Flat helpers ---
+
+function allPanes(state: LayoutState): Pane[] {
+  return state.columns.flatMap(c => c.panes);
+}
+
+function findPaneColumn(state: LayoutState, paneId: string): { col: Column; colIdx: number; paneIdx: number } | null {
+  for (let ci = 0; ci < state.columns.length; ci++) {
+    const col = state.columns[ci];
+    for (let pi = 0; pi < col.panes.length; pi++) {
+      if (col.panes[pi].id === paneId) return { col, colIdx: ci, paneIdx: pi };
+    }
+  }
+  return null;
+}
+
+// --- Migration from old format ---
+
+type OldLayoutState = {
+  mode: 'single' | '2-col' | '2-row' | '2x2';
+  groups: { id: string; tabIds: string[]; activeTabId: string | null }[];
+  activeGroupId: string;
+};
+
+function migrateOldLayout(old: OldLayoutState): LayoutState {
+  const g = old.groups;
+  const pane = (i: number): Pane => ({
+    id: g[i]?.id || uid(),
+    tabIds: g[i]?.tabIds || [],
+    activeTabId: g[i]?.activeTabId || null,
+  });
+
+  switch (old.mode) {
+    case '2-col':
+      return {
+        columns: [makeColumn([pane(0)]), makeColumn([pane(1)])],
+        sizes: [50, 50],
+        activePaneId: old.activeGroupId,
+      };
+    case '2-row':
+      return {
+        columns: [makeColumn([pane(0), pane(1)])],
+        sizes: [100],
+        activePaneId: old.activeGroupId,
+      };
+    case '2x2':
+      return {
+        columns: [
+          makeColumn([pane(0), pane(2)]),
+          makeColumn([pane(1), pane(3)]),
+        ],
+        sizes: [50, 50],
+        activePaneId: old.activeGroupId,
+      };
+    default: {
+      // single
+      const p = pane(0);
+      return {
+        columns: [makeColumn([p])],
+        sizes: [100],
+        activePaneId: p.id,
+      };
+    }
+  }
 }
 
 function loadFromStorage(): LayoutState | null {
   try {
     const raw = localStorage.getItem(LAYOUT_STORAGE_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as LayoutState;
-    if (!parsed.mode || !Array.isArray(parsed.groups)) return null;
-    return parsed;
+    const parsed = JSON.parse(raw);
+
+    // New format
+    if (Array.isArray(parsed.columns)) {
+      const st = parsed as LayoutState;
+      if (st.columns.length === 0 || !st.activePaneId) return null;
+      // Ensure every column has at least one pane
+      if (st.columns.some(c => !Array.isArray(c.panes) || c.panes.length === 0)) return null;
+      // Ensure activePaneId points to an existing pane
+      const allIds = st.columns.flatMap(c => c.panes.map(p => p.id));
+      if (!allIds.includes(st.activePaneId)) {
+        st.activePaneId = allIds[0];
+      }
+      return st;
+    }
+
+    // Old format (mode + groups)
+    if (parsed.mode && Array.isArray(parsed.groups)) {
+      return migrateOldLayout(parsed as OldLayoutState);
+    }
+
+    return null;
   } catch {
     return null;
   }
 }
 
 function defaultLayout(): LayoutState {
+  const p = makePane();
   return {
-    mode: 'single',
-    groups: makeEmptyGroups(),
-    activeGroupId: 'g0',
+    columns: [makeColumn([p])],
+    sizes: [100],
+    activePaneId: p.id,
   };
 }
+
+// --- Hook ---
 
 export function useLayout() {
   const [state, setState] = useState<LayoutState>(() => {
@@ -52,261 +165,332 @@ export function useLayout() {
     localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(state));
   }, [state]);
 
-  const visibleGroups = useMemo(() => {
-    switch (state.mode) {
-      case 'single': return [state.groups[0]];
-      case '2-col': return [state.groups[0], state.groups[1]];
-      case '2-row': return [state.groups[0], state.groups[1]];
-      case '2x2': return state.groups.slice(0, 4);
-    }
-  }, [state.mode, state.groups]);
+  // Derived
+  const visibleGroups = useMemo(() => allPanes(state), [state]);
 
-  const isMultiPane = state.mode !== 'single';
+  const isMultiPane = visibleGroups.length > 1;
 
-  const updateGroup = useCallback((groupId: GroupId, patch: Partial<EditorGroup>) => {
-    setState(prev => ({
-      ...prev,
-      groups: prev.groups.map(g => g.id === groupId ? { ...g, ...patch } : g),
-    }));
+  const activeGroupId = state.activePaneId;
+
+  // For compat: expose groups as flat array
+  const groups = visibleGroups;
+
+  // Also expose the columns-of-rows structure
+  const columns = state.columns;
+  const columnSizes = state.sizes;
+
+  // --- Actions ---
+
+  const focusGroup = useCallback((paneId: string) => {
+    setState(prev => prev.activePaneId === paneId ? prev : { ...prev, activePaneId: paneId });
   }, []);
 
-  const focusGroup = useCallback((groupId: GroupId) => {
-    setState(prev => prev.activeGroupId === groupId ? prev : { ...prev, activeGroupId: groupId });
-  }, []);
-
-  const splitHorizontal = useCallback(() => {
+  // Add a column to the right with equal sizing
+  const addColumn = useCallback(() => {
     setState(prev => {
-      if (prev.mode === 'single') return { ...prev, mode: '2-col' as LayoutMode };
-      if (prev.mode === '2x2') return prev;
-      return { ...prev, mode: '2x2' as LayoutMode }; // 2-col or 2-row → 2x2
+      const newCol = makeColumn();
+      const cols = [...prev.columns, newCol];
+      return { ...prev, columns: cols, sizes: equalSizes(cols.length), activePaneId: newCol.panes[0].id };
     });
   }, []);
 
-  const splitVertical = useCallback(() => {
+  // Add a row (pane) in the active pane's column
+  const addRow = useCallback(() => {
     setState(prev => {
-      if (prev.mode === 'single') return { ...prev, mode: '2-row' as LayoutMode };
-      if (prev.mode === '2x2') return prev;
-      return { ...prev, mode: '2x2' as LayoutMode }; // 2-col or 2-row → 2x2
+      const loc = findPaneColumn(prev, prev.activePaneId);
+      if (!loc) return prev;
+      const newPane = makePane();
+      const col = { ...loc.col, panes: [...loc.col.panes] };
+      col.panes.splice(loc.paneIdx + 1, 0, newPane);
+      col.sizes = equalSizes(col.panes.length);
+      const columns = prev.columns.map(c => c.id === col.id ? col : c);
+      return { ...prev, columns, activePaneId: newPane.id };
     });
   }, []);
 
+  // Add a column at a specific position (for drag: left/right of a target)
+  const addColumnAt = useCallback((targetPaneId: string, side: 'left' | 'right'): string => {
+    const newPane = makePane();
+    const newCol = makeColumn([newPane]);
+    setState(prev => {
+      const loc = findPaneColumn(prev, targetPaneId);
+      if (!loc) return prev;
+      const cols = [...prev.columns];
+      const insertIdx = side === 'right' ? loc.colIdx + 1 : loc.colIdx;
+      cols.splice(insertIdx, 0, newCol);
+      return { ...prev, columns: cols, sizes: equalSizes(cols.length), activePaneId: newPane.id };
+    });
+    return newPane.id;
+  }, []);
+
+  // Add a row at a specific position (for drag: above/below a target)
+  const addRowAt = useCallback((targetPaneId: string, side: 'top' | 'bottom'): string => {
+    const newPane = makePane();
+    setState(prev => {
+      const loc = findPaneColumn(prev, targetPaneId);
+      if (!loc) return prev;
+      const col = { ...loc.col, panes: [...loc.col.panes] };
+      const insertIdx = side === 'bottom' ? loc.paneIdx + 1 : loc.paneIdx;
+      col.panes.splice(insertIdx, 0, newPane);
+      col.sizes = equalSizes(col.panes.length);
+      const columns = prev.columns.map(c => c.id === col.id ? col : c);
+      return { ...prev, columns, activePaneId: newPane.id };
+    });
+    return newPane.id;
+  }, []);
+
+  // 2x2 grid: ensure exactly 2 columns with 2 rows each
   const splitGrid = useCallback(() => {
     setState(prev => {
-      if (prev.mode === '2x2') return prev;
-      return { ...prev, mode: '2x2' };
+      // Already 2x2
+      if (prev.columns.length === 2 && prev.columns[0].panes.length === 2 && prev.columns[1].panes.length === 2) {
+        return prev;
+      }
+      const panes = allPanes(prev);
+      const p0 = panes[0] || makePane();
+      const p1 = panes[1] || makePane();
+      const p2 = panes[2] || makePane();
+      const p3 = panes[3] || makePane();
+      // Reuse existing column IDs if available
+      const colId0 = prev.columns[0]?.id || uid();
+      const colId1 = prev.columns[1]?.id || uid();
+      return {
+        columns: [
+          { id: colId0, panes: [p0, p2], sizes: [50, 50] },
+          { id: colId1, panes: [p1, p3], sizes: [50, 50] },
+        ],
+        sizes: [50, 50],
+        activePaneId: prev.activePaneId,
+      };
     });
   }, []);
+
+  // Compat: splitHorizontal = addColumn, splitVertical = addRow
+  const splitHorizontal = addColumn;
+  const splitVertical = addRow;
 
   const resetToSingle = useCallback(() => {
     setState(prev => {
-      if (prev.mode === 'single') return prev;
-      // Merge all tabs into g0
+      const panes = allPanes(prev);
+      if (panes.length === 1) return prev;
+      // Merge all tabs into one pane
       const allTabIds: string[] = [];
       const seen = new Set<string>();
-      for (const g of prev.groups) {
-        for (const tid of g.tabIds) {
-          if (!seen.has(tid)) {
-            seen.add(tid);
-            allTabIds.push(tid);
-          }
+      for (const p of panes) {
+        for (const tid of p.tabIds) {
+          if (!seen.has(tid)) { seen.add(tid); allTabIds.push(tid); }
         }
       }
-      const activeGroup = prev.groups.find(g => g.id === prev.activeGroupId);
-      const activeTabId = activeGroup?.activeTabId || allTabIds[0] || null;
-      const groups = makeEmptyGroups();
-      groups[0].tabIds = allTabIds;
-      groups[0].activeTabId = activeTabId;
-      return { mode: 'single', groups, activeGroupId: 'g0' };
+      const activePane = panes.find(p => p.id === prev.activePaneId);
+      const activeTabId = activePane?.activeTabId || allTabIds[0] || null;
+      const merged: Pane = { id: uid(), tabIds: allTabIds, activeTabId };
+      return {
+        columns: [makeColumn([merged])],
+        sizes: [100],
+        activePaneId: merged.id,
+      };
     });
   }, []);
 
-  const moveTabToGroup = useCallback((tabId: string, fromGroupId: GroupId, toGroupId: GroupId) => {
-    if (fromGroupId === toGroupId) return;
+  const moveTabToGroup = useCallback((tabId: string, fromPaneId: string, toPaneId: string) => {
+    if (fromPaneId === toPaneId) return;
     setState(prev => {
-      const groups = prev.groups.map(g => ({ ...g, tabIds: [...g.tabIds] }));
-      const from = groups.find(g => g.id === fromGroupId)!;
-      const to = groups.find(g => g.id === toGroupId)!;
+      const panes = allPanes(prev);
+      const from = panes.find(p => p.id === fromPaneId);
+      const to = panes.find(p => p.id === toPaneId);
+      if (!from || !to) return prev;
 
       const idx = from.tabIds.indexOf(tabId);
       if (idx < 0) return prev;
 
-      from.tabIds.splice(idx, 1);
-      to.tabIds.push(tabId);
+      const updatePane = (p: Pane): Pane => {
+        if (p.id === fromPaneId) {
+          const newTabIds = p.tabIds.filter(id => id !== tabId);
+          return {
+            ...p,
+            tabIds: newTabIds,
+            activeTabId: p.activeTabId === tabId
+              ? (newTabIds[Math.min(idx, newTabIds.length - 1)] || null)
+              : p.activeTabId,
+          };
+        }
+        if (p.id === toPaneId) {
+          return {
+            ...p,
+            tabIds: p.tabIds.includes(tabId) ? p.tabIds : [...p.tabIds, tabId],
+            activeTabId: tabId,
+          };
+        }
+        return p;
+      };
 
-      // Update activeTabId if we moved the active tab
-      if (from.activeTabId === tabId) {
-        from.activeTabId = from.tabIds[Math.min(idx, from.tabIds.length - 1)] || null;
-      }
-      to.activeTabId = tabId;
+      const columns = prev.columns.map(c => ({
+        ...c,
+        panes: c.panes.map(updatePane),
+      }));
 
-      return { ...prev, groups, activeGroupId: toGroupId };
+      return { ...prev, columns, activePaneId: toPaneId };
     });
   }, []);
 
-  // Add a tab to a group (called by useTabs)
-  const addTabToGroup = useCallback((tabId: string, groupId?: GroupId) => {
+  const addTabToGroup = useCallback((tabId: string, paneId?: string) => {
     setState(prev => {
-      const targetId = groupId || prev.activeGroupId;
-      const groups = prev.groups.map(g => {
-        if (g.id !== targetId) return g;
-        if (g.tabIds.includes(tabId)) return { ...g, activeTabId: tabId };
-        return { ...g, tabIds: [...g.tabIds, tabId], activeTabId: tabId };
-      });
-      return { ...prev, groups };
+      const targetId = paneId || prev.activePaneId;
+      const columns = prev.columns.map(c => ({
+        ...c,
+        panes: c.panes.map(p => {
+          if (p.id !== targetId) return p;
+          if (p.tabIds.includes(tabId)) return { ...p, activeTabId: tabId };
+          return { ...p, tabIds: [...p.tabIds, tabId], activeTabId: tabId };
+        }),
+      }));
+      return { ...prev, columns };
     });
   }, []);
 
-  // Remove a tab from whichever group owns it
-  const removeTabFromGroup = useCallback((tabId: string): { groupId: GroupId; wasActive: boolean; neighborTabId: string | null } => {
-    // Compute result from current state BEFORE queuing the update
-    // (setState updaters may not run synchronously in React 18)
-    const group = state.groups.find(g => g.tabIds.includes(tabId));
-    if (!group) return { groupId: 'g0' as GroupId, wasActive: false, neighborTabId: null };
+  const removeTabFromGroup = useCallback((tabId: string): { groupId: string; wasActive: boolean; neighborTabId: string | null } => {
+    const panes = allPanes(state);
+    const pane = panes.find(p => p.tabIds.includes(tabId));
+    if (!pane) return { groupId: '', wasActive: false, neighborTabId: null };
 
-    const idx = group.tabIds.indexOf(tabId);
-    const wasActive = group.activeTabId === tabId;
-    const newTabIds = group.tabIds.filter(id => id !== tabId);
+    const idx = pane.tabIds.indexOf(tabId);
+    const wasActive = pane.activeTabId === tabId;
+    const newTabIds = pane.tabIds.filter(id => id !== tabId);
     const neighborIdx = Math.min(idx, newTabIds.length - 1);
     const neighborTabId = newTabIds[neighborIdx] || null;
 
     setState(prev => ({
       ...prev,
-      groups: prev.groups.map(g => {
-        if (!g.tabIds.includes(tabId)) return g;
-        const filtered = g.tabIds.filter(id => id !== tabId);
-        return {
-          ...g,
-          tabIds: filtered,
-          activeTabId: g.activeTabId === tabId
-            ? (filtered[Math.min(g.tabIds.indexOf(tabId), filtered.length - 1)] || null)
-            : g.activeTabId,
-        };
-      }),
+      columns: prev.columns.map(c => ({
+        ...c,
+        panes: c.panes.map(p => {
+          if (!p.tabIds.includes(tabId)) return p;
+          const filtered = p.tabIds.filter(id => id !== tabId);
+          return {
+            ...p,
+            tabIds: filtered,
+            activeTabId: p.activeTabId === tabId
+              ? (filtered[Math.min(p.tabIds.indexOf(tabId), filtered.length - 1)] || null)
+              : p.activeTabId,
+          };
+        }),
+      })),
     }));
 
-    return { groupId: group.id, wasActive, neighborTabId };
-  }, [state.groups]);
+    return { groupId: pane.id, wasActive, neighborTabId };
+  }, [state]);
 
-  // Set a group's active tab
-  const setGroupActiveTab = useCallback((groupId: GroupId, tabId: string) => {
+  const setGroupActiveTab = useCallback((paneId: string, tabId: string) => {
     setState(prev => ({
       ...prev,
-      groups: prev.groups.map(g =>
-        g.id === groupId ? { ...g, activeTabId: tabId } : g
-      ),
+      columns: prev.columns.map(c => ({
+        ...c,
+        panes: c.panes.map(p =>
+          p.id === paneId ? { ...p, activeTabId: tabId } : p
+        ),
+      })),
     }));
   }, []);
 
-  // Find which group owns a tab
-  const findGroupForTab = useCallback((tabId: string): GroupId | null => {
-    for (const g of state.groups) {
-      if (g.tabIds.includes(tabId)) return g.id;
+  const findGroupForTab = useCallback((tabId: string): string | null => {
+    for (const p of allPanes(state)) {
+      if (p.tabIds.includes(tabId)) return p.id;
     }
     return null;
-  }, [state.groups]);
+  }, [state]);
 
-  // Collapse an empty group — downgrade layout mode
-  const collapseGroup = useCallback((emptyGroupId: GroupId) => {
+  // Collapse an empty pane: remove it, equalize sizes, collapse column if empty
+  const collapseGroup = useCallback((emptyPaneId: string) => {
     setState(prev => {
-      if (prev.mode === 'single') return prev;
+      let columns = prev.columns.map(c => {
+        if (!c.panes.some(p => p.id === emptyPaneId)) return c;
+        const panes = c.panes.filter(p => p.id !== emptyPaneId);
+        return { ...c, panes, sizes: equalSizes(Math.max(panes.length, 1)) };
+      });
 
-      if (prev.mode === '2-col' || prev.mode === '2-row') {
-        // Two groups → single: keep the non-empty group's tabs in g0
-        const survivorIdx = prev.groups[0].id === emptyGroupId ? 1 : 0;
-        const survivor = prev.groups[survivorIdx];
-        const groups = makeEmptyGroups();
-        groups[0].tabIds = [...survivor.tabIds];
-        groups[0].activeTabId = survivor.activeTabId;
-        return { mode: 'single' as LayoutMode, groups, activeGroupId: 'g0' };
+      // Remove empty columns
+      columns = columns.filter(c => c.panes.length > 0);
+
+      // If nothing left, make a default
+      if (columns.length === 0) {
+        const p = makePane();
+        return { columns: [makeColumn([p])], sizes: [100], activePaneId: p.id };
       }
 
-      // 2x2 → 2-col or 2-row: merge the empty group's column/row partner
-      // Grid: g0=top-left, g1=top-right, g2=bottom-left, g3=bottom-right
-      const emptyIdx = ALL_GROUP_IDS.indexOf(emptyGroupId);
-      const groups = makeEmptyGroups();
+      const sizes = equalSizes(columns.length);
 
-      // Collect all tabs from non-empty groups
-      const remaining = prev.groups.filter(g => g.id !== emptyGroupId && g.tabIds.length > 0);
-
-      if (remaining.length <= 1) {
-        // Only 0-1 groups have tabs — go to single
-        const survivor = remaining[0];
-        if (survivor) {
-          groups[0].tabIds = [...survivor.tabIds];
-          groups[0].activeTabId = survivor.activeTabId;
-        }
-        return { mode: 'single' as LayoutMode, groups, activeGroupId: 'g0' };
+      // Fix activePaneId if it was the collapsed pane
+      let activePaneId = prev.activePaneId;
+      if (activePaneId === emptyPaneId) {
+        const all = allPanes({ columns, sizes, activePaneId: '' });
+        activePaneId = all[0]?.id || '';
       }
 
-      // 2 or 3 remaining groups — go to 2-col, putting left-column groups in g0, right in g1
-      // (or top/bottom for 2-row based on which group was removed)
-      const isRowCollapse = emptyIdx === 0 || emptyIdx === 1; // top row lost a member
-      const newMode: LayoutMode = isRowCollapse ? '2-row' : '2-col';
-
-      // Just put first remaining group in g0, second in g1, extras merge into g1
-      groups[0].tabIds = [...remaining[0].tabIds];
-      groups[0].activeTabId = remaining[0].activeTabId;
-      const mergedIds: string[] = [];
-      let mergedActive: string | null = null;
-      for (let i = 1; i < remaining.length; i++) {
-        mergedIds.push(...remaining[i].tabIds);
-        if (!mergedActive) mergedActive = remaining[i].activeTabId;
-      }
-      groups[1].tabIds = mergedIds;
-      groups[1].activeTabId = mergedActive;
-
-      // Map activeGroupId to the destination group that received its tabs
-      let finalActiveGroup: GroupId = 'g0';
-      if (prev.activeGroupId !== emptyGroupId) {
-        const activeRemIdx = remaining.findIndex(g => g.id === prev.activeGroupId);
-        // remaining[0] → g0, remaining[1+] → merged into g1
-        if (activeRemIdx > 0) finalActiveGroup = 'g1';
-      }
-
-      return { mode: newMode, groups, activeGroupId: finalActiveGroup };
+      return { columns, sizes, activePaneId };
     });
   }, []);
 
-  // Navigate focus between groups
+  // Navigate focus between panes spatially
   const focusGroupDirection = useCallback((direction: 'left' | 'right' | 'up' | 'down') => {
     setState(prev => {
-      const currentIdx = ALL_GROUP_IDS.indexOf(prev.activeGroupId);
-      let nextIdx: number;
+      const loc = findPaneColumn(prev, prev.activePaneId);
+      if (!loc) return prev;
 
-      if (prev.mode === '2-col') {
-        if (direction === 'left') nextIdx = 0;
-        else if (direction === 'right') nextIdx = 1;
-        else return prev;
-      } else if (prev.mode === '2-row') {
-        if (direction === 'up') nextIdx = 0;
-        else if (direction === 'down') nextIdx = 1;
-        else return prev;
-      } else if (prev.mode === '2x2') {
-        // Grid: g0=top-left, g1=top-right, g2=bottom-left, g3=bottom-right
-        const grid: Record<number, Record<string, number>> = {
-          0: { right: 1, down: 2 },
-          1: { left: 0, down: 3 },
-          2: { right: 3, up: 0 },
-          3: { left: 2, up: 1 },
-        };
-        nextIdx = grid[currentIdx]?.[direction] ?? currentIdx;
-      } else {
-        return prev;
+      let targetPaneId: string | null = null;
+
+      if (direction === 'left') {
+        if (loc.colIdx > 0) {
+          const leftCol = prev.columns[loc.colIdx - 1];
+          const pi = Math.min(loc.paneIdx, leftCol.panes.length - 1);
+          targetPaneId = leftCol.panes[pi].id;
+        }
+      } else if (direction === 'right') {
+        if (loc.colIdx < prev.columns.length - 1) {
+          const rightCol = prev.columns[loc.colIdx + 1];
+          const pi = Math.min(loc.paneIdx, rightCol.panes.length - 1);
+          targetPaneId = rightCol.panes[pi].id;
+        }
+      } else if (direction === 'up') {
+        if (loc.paneIdx > 0) {
+          targetPaneId = loc.col.panes[loc.paneIdx - 1].id;
+        }
+      } else if (direction === 'down') {
+        if (loc.paneIdx < loc.col.panes.length - 1) {
+          targetPaneId = loc.col.panes[loc.paneIdx + 1].id;
+        }
       }
 
-      const nextGroupId = ALL_GROUP_IDS[nextIdx];
-      if (!nextGroupId || nextGroupId === prev.activeGroupId) return prev;
-      return { ...prev, activeGroupId: nextGroupId };
+      if (!targetPaneId || targetPaneId === prev.activePaneId) return prev;
+      return { ...prev, activePaneId: targetPaneId };
     });
+  }, []);
+
+  const updateGroup = useCallback((paneId: string, patch: Partial<Pane>) => {
+    setState(prev => ({
+      ...prev,
+      columns: prev.columns.map(c => ({
+        ...c,
+        panes: c.panes.map(p => p.id === paneId ? { ...p, ...patch } : p),
+      })),
+    }));
   }, []);
 
   return {
-    mode: state.mode,
-    groups: state.groups,
-    activeGroupId: state.activeGroupId,
+    // State
+    columns,
+    columnSizes,
+    groups,
+    activeGroupId,
     visibleGroups,
     isMultiPane,
+    // Compat (old mode-based API still works for callers that check it)
+    mode: (visibleGroups.length === 1 ? 'single' : 'multi') as string,
+    // Actions
     focusGroup,
+    addColumn,
+    addRow,
+    addColumnAt,
+    addRowAt,
     splitHorizontal,
     splitVertical,
     splitGrid,
