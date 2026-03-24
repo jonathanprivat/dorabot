@@ -145,10 +145,15 @@ type OAuthTokens = {
 let nextRefreshAt: number | null = null;
 let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectRequired = false;
+let lastAuthRequiredEmit = 0;
+const AUTH_REQUIRED_COOLDOWN_MS = 60_000;
 const authRequiredListeners = new Set<(reason: string) => void>();
 
 function emitAuthRequired(reason: string): void {
   reconnectRequired = true;
+  const now = Date.now();
+  if (now - lastAuthRequiredEmit < AUTH_REQUIRED_COOLDOWN_MS) return;
+  lastAuthRequiredEmit = now;
   for (const listener of authRequiredListeners) {
     try {
       listener(reason);

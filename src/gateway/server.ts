@@ -403,17 +403,24 @@ export async function startGateway(opts: GatewayOptions): Promise<Gateway> {
     });
   }
 
-  const unsubscribeClaudeAuthRequired = onClaudeAuthRequired((reason) => {
+  const authBroadcastCooldowns = new Map<string, number>();
+  const AUTH_BROADCAST_COOLDOWN_MS = 60_000;
+  function broadcastAuthRequired(provider: string, reason: string) {
+    const now = Date.now();
+    const last = authBroadcastCooldowns.get(provider) || 0;
+    if (now - last < AUTH_BROADCAST_COOLDOWN_MS) return;
+    authBroadcastCooldowns.set(provider, now);
     broadcast({
       event: 'provider.auth_required',
-      data: { provider: 'claude', reason, timestamp: Date.now() },
+      data: { provider, reason, timestamp: now },
     });
+  }
+
+  const unsubscribeClaudeAuthRequired = onClaudeAuthRequired((reason) => {
+    broadcastAuthRequired('claude', reason);
   });
   const unsubscribeCodexAuthRequired = onCodexAuthRequired((reason) => {
-    broadcast({
-      event: 'provider.auth_required',
-      data: { provider: 'codex', reason, timestamp: Date.now() },
-    });
+    broadcastAuthRequired('codex', reason);
   });
 
   // file system watcher manager
@@ -2153,10 +2160,7 @@ export async function startGateway(opts: GatewayOptions): Promise<Gateway> {
       const error = providerAuth.error || 'Not authenticated';
       console.log(`[gateway] ${providerAuth.providerName} auth unavailable, skipping run for ${source}: ${error}`);
       if (providerAuth.reconnectRequired) {
-        broadcast({
-          event: 'provider.auth_required',
-          data: { provider: providerAuth.providerName, reason: error, timestamp: Date.now() },
-        });
+        broadcastAuthRequired(providerAuth.providerName, error);
       }
       broadcast({ event: 'agent.error', data: { source, sessionKey, error, timestamp: Date.now() } });
       return null;
@@ -2866,10 +2870,7 @@ export async function startGateway(opts: GatewayOptions): Promise<Gateway> {
             console.log(`[gateway] silent refresh failed for ${source}, starting interactive re-auth`);
             const started = await startReauthFlow({ prompt, sessionKey, source, channel, chatId: messageMetadata?.chatId, messageMetadata }).catch(() => false);
             if (started) {
-              broadcast({
-                event: 'provider.auth_required',
-                data: { provider: provName, reason: refreshedGate.error || 'Authentication required', timestamp: Date.now() },
-              });
+              broadcastAuthRequired(provName, refreshedGate.error || 'Authentication required');
               suppressError = true;
             }
           }
