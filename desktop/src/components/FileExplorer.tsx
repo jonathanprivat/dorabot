@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import type React from 'react';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -44,6 +44,9 @@ type GitBranchInfo = {
   name: string;
   current: boolean;
   remote: boolean;
+  lastCommitDate: string;
+  author: string;
+  isMine: boolean;
 };
 
 type GitCommit = {
@@ -80,6 +83,20 @@ type ContextMenuState = {
   path: string;
   isDir: boolean;
 } | null;
+
+function timeAgo(dateStr: string): string {
+  if (!dateStr) return '';
+  const ms = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(ms / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  const months = Math.floor(days / 30);
+  return `${months}mo ago`;
+}
 
 type Props = {
   rpc: (method: string, params?: Record<string, unknown>) => Promise<unknown>;
@@ -228,6 +245,38 @@ function WorktreeDropdown({ mainBranch, worktrees, activeWorktreePath, onSelect,
         </div>
       )}
     </div>
+  );
+}
+
+// ── Branch Row ─────────────────────────────────────────────────────
+
+function BranchRow({ branch: b, idx, selectedIdx, onSelect, onCheckout, showMeta }: {
+  branch: GitBranchInfo;
+  idx: number;
+  selectedIdx: number;
+  onSelect: (idx: number) => void;
+  onCheckout: (name: string) => void;
+  showMeta?: boolean;
+}) {
+  return (
+    <button
+      className={cn(
+        'flex items-center gap-2 w-full px-3 py-1.5 text-[12px] text-left transition-colors group',
+        idx === selectedIdx ? 'bg-accent text-accent-foreground' : 'hover:bg-secondary/50',
+        b.current && 'font-medium',
+      )}
+      onClick={() => onCheckout(b.name)}
+      onMouseEnter={() => onSelect(idx)}
+    >
+      {b.current ? <Check className="w-3.5 h-3.5 shrink-0 text-primary" /> : <span className="w-3.5 shrink-0" />}
+      <span className={cn('truncate', b.remote && !b.current && 'text-muted-foreground')}>{b.name}</span>
+      {showMeta && b.lastCommitDate && (
+        <span className="ml-auto flex items-center gap-1.5 shrink-0 text-[10px] text-muted-foreground/70">
+          {b.author && <span className="hidden group-hover:inline">{b.author}</span>}
+          <span>{timeAgo(b.lastCommitDate)}</span>
+        </span>
+      )}
+    </button>
   );
 }
 
@@ -519,15 +568,31 @@ function GitPanel({ rpc, gitState, onFileClick, onOpenDiff, onRefresh, onOpenTer
     }
   }, [effectiveState.root, rpc, onOpenDiff, onFileClick]);
 
-  // Branch picker keyboard nav
+  // Branch picker
+  const [branchView, setBranchView] = useState<'recent' | 'mine' | 'all'>('recent');
   const filteredBranches = branchFilter
     ? branches.filter(b => b.name.toLowerCase().includes(branchFilter.toLowerCase()))
     : branches;
 
-  const localBranches = filteredBranches.filter(b => !b.remote);
-  const remoteBranches = filteredBranches.filter(b => b.remote);
+  const branchGroups = useMemo(() => {
+    // Already sorted by lastCommitDate from gateway (--sort=-committerdate)
+    const mine = filteredBranches.filter(b => b.isMine);
+    const local = filteredBranches.filter(b => !b.remote);
+    const remote = filteredBranches.filter(b => b.remote);
+    // "recent" = all branches, already sorted by date
+    // "mine" = only isMine branches
+    // "all" = local then remote (classic view)
+    return { mine, local, remote };
+  }, [filteredBranches]);
+
+  const visibleBranches = useMemo(() => {
+    if (branchView === 'mine') return branchGroups.mine;
+    if (branchView === 'all') return [...branchGroups.local, ...branchGroups.remote];
+    return filteredBranches; // recent: all, sorted by date
+  }, [branchView, branchGroups, filteredBranches]);
+
   const canCreateBranch = branchFilter.trim().length > 0 && !branches.some(b => b.name === branchFilter.trim());
-  const allFiltered = [...localBranches, ...remoteBranches];
+  const allFiltered = visibleBranches;
 
   useEffect(() => {
     setBranchSelectedIdx(0);
@@ -957,6 +1022,23 @@ function GitPanel({ rpc, gitState, onFileClick, onOpenDiff, onRefresh, onOpenTer
                 autoFocus
               />
             </div>
+            {/* view tabs */}
+            <div className="flex items-center gap-0 px-1 py-1 border-b border-border bg-muted/20">
+              {(['recent', 'mine', 'all'] as const).map(tab => (
+                <button
+                  key={tab}
+                  className={cn(
+                    'px-2.5 py-0.5 rounded text-[10px] font-medium transition-colors',
+                    branchView === tab
+                      ? 'bg-secondary text-foreground'
+                      : 'text-muted-foreground hover:text-foreground'
+                  )}
+                  onClick={() => { setBranchView(tab); setBranchSelectedIdx(0); }}
+                >
+                  {tab === 'recent' ? 'Recent' : tab === 'mine' ? 'Mine' : 'All'}
+                </button>
+              ))}
+            </div>
             <div className="flex-1 overflow-y-auto min-h-0">
               {canCreateBranch && (
                 <button
@@ -971,56 +1053,49 @@ function GitPanel({ rpc, gitState, onFileClick, onOpenDiff, onRefresh, onOpenTer
                   <span className="truncate">Create branch <span className="font-medium">{branchFilter.trim()}</span></span>
                 </button>
               )}
-              {localBranches.length > 0 && (
+              {branchView === 'all' ? (
+                /* classic local/remote grouping */
                 <>
-                  <div className="px-3 py-1 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider bg-muted/30 sticky top-0">
-                    Local Branches
-                  </div>
-                  {localBranches.map((b, i) => {
-                    const globalIdx = (canCreateBranch ? 1 : 0) + i;
-                    return (
-                      <button
-                        key={b.name}
-                        className={cn(
-                          'flex items-center gap-2 w-full px-3 py-1.5 text-[12px] text-left transition-colors',
-                          globalIdx === branchSelectedIdx ? 'bg-accent text-accent-foreground' : 'hover:bg-secondary/50',
-                          b.current && 'font-medium'
-                        )}
-                        onClick={() => handleCheckout(b.name)}
-                        onMouseEnter={() => setBranchSelectedIdx(globalIdx)}
-                      >
-                        {b.current ? <Check className="w-3.5 h-3.5 shrink-0 text-primary" /> : <span className="w-3.5 shrink-0" />}
-                        <span className="truncate">{b.name}</span>
-                      </button>
-                    );
-                  })}
+                  {branchGroups.local.length > 0 && (
+                    <>
+                      <div className="px-3 py-1 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider bg-muted/30 sticky top-0">
+                        Local
+                      </div>
+                      {branchGroups.local.map((b, i) => {
+                        const globalIdx = (canCreateBranch ? 1 : 0) + i;
+                        return (
+                          <BranchRow key={b.name} branch={b} idx={globalIdx} selectedIdx={branchSelectedIdx}
+                            onSelect={setBranchSelectedIdx} onCheckout={handleCheckout} showMeta />
+                        );
+                      })}
+                    </>
+                  )}
+                  {branchGroups.remote.length > 0 && (
+                    <>
+                      <div className="px-3 py-1 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider bg-muted/30 sticky top-0">
+                        Remote
+                      </div>
+                      {branchGroups.remote.map((b, i) => {
+                        const globalIdx = (canCreateBranch ? 1 : 0) + branchGroups.local.length + i;
+                        return (
+                          <BranchRow key={b.name} branch={b} idx={globalIdx} selectedIdx={branchSelectedIdx}
+                            onSelect={setBranchSelectedIdx} onCheckout={handleCheckout} showMeta />
+                        );
+                      })}
+                    </>
+                  )}
                 </>
+              ) : (
+                /* recent or mine: flat list sorted by date */
+                visibleBranches.map((b, i) => {
+                  const globalIdx = (canCreateBranch ? 1 : 0) + i;
+                  return (
+                    <BranchRow key={b.name} branch={b} idx={globalIdx} selectedIdx={branchSelectedIdx}
+                      onSelect={setBranchSelectedIdx} onCheckout={handleCheckout} showMeta />
+                  );
+                })
               )}
-              {remoteBranches.length > 0 && (
-                <>
-                  <div className="px-3 py-1 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider bg-muted/30 sticky top-0">
-                    Remote Branches
-                  </div>
-                  {remoteBranches.map((b, i) => {
-                    const globalIdx = (canCreateBranch ? 1 : 0) + localBranches.length + i;
-                    return (
-                      <button
-                        key={b.name}
-                        className={cn(
-                          'flex items-center gap-2 w-full px-3 py-1.5 text-[12px] text-left transition-colors',
-                          globalIdx === branchSelectedIdx ? 'bg-accent text-accent-foreground' : 'hover:bg-secondary/50'
-                        )}
-                        onClick={() => handleCheckout(b.name)}
-                        onMouseEnter={() => setBranchSelectedIdx(globalIdx)}
-                      >
-                        <span className="w-3.5 shrink-0" />
-                        <span className="truncate text-muted-foreground">{b.name}</span>
-                      </button>
-                    );
-                  })}
-                </>
-              )}
-              {allFiltered.length === 0 && (
+              {allFiltered.length === 0 && !canCreateBranch && (
                 <div className="px-3 py-3 text-[12px] text-muted-foreground text-center">No matching branches</div>
               )}
             </div>

@@ -4931,16 +4931,35 @@ export async function startGateway(opts: GatewayOptions): Promise<Gateway> {
           const resolved = resolve(repoRoot);
           try {
             const { execFileSync } = await import('node:child_process');
-            const raw = execFileSync('git', ['branch', '-a', '--no-color'], {
+            const raw = execFileSync('git', [
+              'branch', '-a', '--sort=-committerdate', '--no-color',
+              '--format=%(refname:short)|%(committerdate:iso8601)|%(authorname)|%(HEAD)',
+            ], {
               cwd: resolved, encoding: 'utf-8', timeout: 5000,
             }).trim();
-            const branches: { name: string; current: boolean; remote: boolean }[] = [];
+            const userName = execFileSync('git', ['config', 'user.name'], {
+              cwd: resolved, encoding: 'utf-8', timeout: 2000,
+            }).trim();
+            const branches: { name: string; current: boolean; remote: boolean; lastCommitDate: string; author: string; isMine: boolean }[] = [];
             if (raw) {
               for (const line of raw.split('\n')) {
-                const current = line.startsWith('* ');
-                const name = line.replace(/^\*?\s+/, '').replace(/^remotes\//, '');
-                if (name.includes(' -> ')) continue;
-                branches.push({ name, current, remote: line.includes('remotes/') });
+                const parts = line.split('|');
+                if (parts.length < 4) continue;
+                const rawName = parts[0].trim();
+                const date = parts[1].trim();
+                const author = parts[2].trim();
+                const head = parts[3].trim();
+                if (rawName.includes(' -> ')) continue;
+                const remote = rawName.startsWith('origin/');
+                const name = remote ? rawName : rawName;
+                branches.push({
+                  name,
+                  current: head === '*',
+                  remote,
+                  lastCommitDate: date,
+                  author,
+                  isMine: author === userName,
+                });
               }
             }
             return { id, result: { branches } };
