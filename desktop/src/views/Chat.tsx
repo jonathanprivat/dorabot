@@ -484,6 +484,7 @@ function AskUserQuestionPanel({
       {/* Expandable content */}
       {!collapsed && (
         <div className="px-3 pb-2 space-y-1.5">
+          <p className="text-xs text-foreground leading-snug">{q.question}</p>
           <div className="flex flex-col gap-1">
             {options.map((opt, oi) => {
               const selected = q.multiSelect
