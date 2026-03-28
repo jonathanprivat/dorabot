@@ -9,6 +9,7 @@ import {
   Folder, File, ChevronRight, ChevronDown, FolderPlus, FilePlus, Pencil, Trash2,
   GitBranch, FolderGit2, Plus, Minus, FileEdit, RefreshCw, ArrowDownToLine, ArrowUpToLine,
   Check, ChevronUp, Undo2, RotateCcw, X, Search, ChevronsUpDown,
+  GitPullRequest, ExternalLink, ArrowLeftRight, Circle,
 } from 'lucide-react';
 import { toast } from '@/hooks/useToast';
 
@@ -69,6 +70,28 @@ type WorktreeInfo = {
   ahead: number;
   behind: number;
   lastCommit: string;
+};
+
+type GitPR = {
+  number: number;
+  title: string;
+  headRefName: string;
+  baseRefName: string;
+  state: string;
+  isDraft: boolean;
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+  url: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type DiffFile = {
+  path: string;
+  additions: number;
+  deletions: number;
+  binary?: boolean;
 };
 
 type DirState = {
@@ -192,7 +215,7 @@ function WorktreeDropdown({ mainBranch, worktrees, activeWorktreePath, onSelect,
         <ChevronsUpDown className="w-2.5 h-2.5 text-muted-foreground shrink-0" />
       </button>
       {open && (
-        <div className="absolute top-full left-0 right-0 z-50 mt-0.5 rounded-md border border-border bg-popover shadow-md overflow-hidden">
+        <div className="absolute top-full left-0 right-0 z-50 mt-0.5 rounded-md border border-border bg-popover shadow-md overflow-y-auto max-h-[200px]">
           {allItems.map(item => {
             const isActive = item.path === activeWorktreePath;
             return (
@@ -374,6 +397,80 @@ function GitPanel({ rpc, gitState, onFileClick, onOpenDiff, onRefresh, onOpenTer
   const showWorktreeBar = nonMainWorktrees.length > 0;
   const isWorktreeContext = !!activeWorktreePath;
 
+  // ── PRs & Branch Comparison ──
+  const [showPRs, setShowPRs] = useState(false);
+  const [prs, setPrs] = useState<GitPR[]>([]);
+  const [prsLoading, setPrsLoading] = useState(false);
+  const [ghMissing, setGhMissing] = useState(false);
+  const [ghAuthError, setGhAuthError] = useState(false);
+  const [expandedPR, setExpandedPR] = useState<number | null>(null);
+  const [prFiles, setPrFiles] = useState<DiffFile[]>([]);
+  const [prFilesLoading, setPrFilesLoading] = useState(false);
+  const [showCompare, setShowCompare] = useState(false);
+  const [compareBase, setCompareBase] = useState('');
+  const [compareHead, setCompareHead] = useState('');
+  const [compareResult, setCompareResult] = useState<{ files: DiffFile[]; commits: GitCommit[]; totalAdditions: number; totalDeletions: number } | null>(null);
+  const [compareLoading, setCompareLoading] = useState(false);
+
+  // Reset PR & compare state when repo root changes (e.g. worktree switch)
+  const prevRootRef = useRef(effectiveState.root);
+  useEffect(() => {
+    if (prevRootRef.current !== effectiveState.root) {
+      prevRootRef.current = effectiveState.root;
+      setPrs([]); setExpandedPR(null); setPrFiles([]); setGhMissing(false); setGhAuthError(false);
+      setCompareBase(''); setCompareHead(''); setCompareResult(null);
+    }
+  }, [effectiveState.root]);
+
+  const loadPRs = useCallback(async () => {
+    setPrsLoading(true);
+    setGhMissing(false);
+    setGhAuthError(false);
+    setExpandedPR(null);
+    setPrFiles([]);
+    prFilesRequestRef.current = null;
+    try {
+      const res = await rpc('git.prs', { path: effectiveState.root }) as { prs: GitPR[]; ghMissing?: boolean; ghAuthError?: boolean };
+      setPrs(res.prs || []);
+      if (res.ghMissing) setGhMissing(true);
+      if (res.ghAuthError) setGhAuthError(true);
+    } catch { /* ignore */ }
+    setPrsLoading(false);
+  }, [rpc, effectiveState.root]);
+
+  // Track in-flight PR file request to avoid race conditions
+  const prFilesRequestRef = useRef<number | null>(null);
+  const loadPRFiles = useCallback(async (prNumber: number) => {
+    prFilesRequestRef.current = prNumber;
+    setPrFilesLoading(true);
+    try {
+      const res = await rpc('git.prDiff', { path: effectiveState.root, number: prNumber }) as { files: DiffFile[] };
+      if (prFilesRequestRef.current !== prNumber) return; // superseded by a newer request
+      setPrFiles(res.files || []);
+    } catch {
+      if (prFilesRequestRef.current === prNumber) setPrFiles([]);
+    }
+    if (prFilesRequestRef.current === prNumber) setPrFilesLoading(false);
+  }, [rpc, effectiveState.root]);
+
+  const runBranchCompare = useCallback(async () => {
+    if (!compareBase || !compareHead || compareBase === compareHead) return;
+    setCompareLoading(true);
+    setCompareResult(null);
+    try {
+      const res = await rpc('git.branchCompare', { path: effectiveState.root, base: compareBase, compare: compareHead }) as { files: DiffFile[]; commits: GitCommit[]; totalAdditions: number; totalDeletions: number };
+      setCompareResult({
+        files: res.files || [],
+        commits: res.commits || [],
+        totalAdditions: res.totalAdditions || 0,
+        totalDeletions: res.totalDeletions || 0,
+      });
+    } catch (err) {
+      toast(err instanceof Error ? err.message : String(err), 'error');
+    }
+    setCompareLoading(false);
+  }, [rpc, effectiveState.root, compareBase, compareHead]);
+
   const staged = effectiveState.files.filter(f => f.staged);
   const unstaged = effectiveState.files.filter(f => !f.staged);
   const hasAhead = effectiveState.ahead > 0;
@@ -385,6 +482,18 @@ function GitPanel({ rpc, gitState, onFileClick, onOpenDiff, onRefresh, onOpenTer
       setBranches(res.branches);
     } catch { /* ignore */ }
   }, [rpc, effectiveState.root]);
+
+  // Auto-populate compare selects once branches load (only when compare is open and selects are empty)
+  useEffect(() => {
+    if (!showCompare || branches.length === 0) return;
+    if (!compareBase) {
+      const defaultBase = branches.find(b => !b.remote && (b.name === 'main' || b.name === 'master'))?.name || '';
+      setCompareBase(defaultBase);
+    }
+    if (!compareHead) {
+      setCompareHead(effectiveState.branch || '');
+    }
+  }, [showCompare, branches, compareBase, compareHead, effectiveState.branch]);
 
   const loadCommits = useCallback(async () => {
     try {
@@ -747,7 +856,7 @@ function GitPanel({ rpc, gitState, onFileClick, onOpenDiff, onRefresh, onOpenTer
         <div className="px-1.5 py-1 border-b border-border shrink-0">
           {nonMainWorktrees.length <= 3 ? (
             /* chips mode for <= 3 worktrees */
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
               <button
                 className={cn(
                   'inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium transition-colors shrink-0',
@@ -971,6 +1080,243 @@ function GitPanel({ rpc, gitState, onFileClick, onOpenDiff, onRefresh, onOpenTer
               ))}
               {commits.length === 0 && (
                 <div className="px-2 py-2 text-[11px] text-muted-foreground">Loading...</div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* pull requests */}
+        <div className="mt-1">
+          <button
+            className="flex items-center gap-1 px-2 py-1 w-full text-left hover:bg-secondary/50 transition-colors"
+            onClick={() => { setShowPRs(v => !v); if (!showPRs) loadPRs(); }}
+          >
+            {showPRs ? <ChevronDown className="w-3 h-3 shrink-0" /> : <ChevronRight className="w-3 h-3 shrink-0" />}
+            <GitPullRequest className="w-3 h-3 shrink-0 text-muted-foreground" />
+            <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Pull Requests</span>
+          </button>
+          {showPRs && (
+            <div>
+              {prsLoading && (
+                <div className="px-2 py-2 text-[11px] text-muted-foreground flex items-center gap-1.5">
+                  <RefreshCw className="w-3 h-3 animate-spin" /> Loading...
+                </div>
+              )}
+              {ghMissing && !prsLoading && (
+                <div className="px-2 py-2 text-[10px] text-muted-foreground">
+                  Install <span className="font-mono">gh</span> CLI to view PRs
+                </div>
+              )}
+              {ghAuthError && !prsLoading && (
+                <div className="px-2 py-2 text-[10px] text-muted-foreground">
+                  Run <span className="font-mono">gh auth login</span> to authenticate
+                </div>
+              )}
+              {!prsLoading && !ghMissing && !ghAuthError && prs.length === 0 && (
+                <div className="px-2 py-2 text-[11px] text-muted-foreground">No open PRs</div>
+              )}
+              {prs.map(pr => (
+                <div key={pr.number}>
+                  <button
+                    className={cn(
+                      'flex items-start gap-1.5 px-2 py-1.5 w-full text-left transition-colors',
+                      expandedPR === pr.number ? 'bg-secondary/50' : 'hover:bg-secondary/30',
+                    )}
+                    onClick={() => {
+                      if (expandedPR === pr.number) { setExpandedPR(null); setPrFiles([]); }
+                      else { setExpandedPR(pr.number); loadPRFiles(pr.number); }
+                    }}
+                  >
+                    <Circle className={cn(
+                      'w-2 h-2 mt-1 shrink-0 fill-current',
+                      pr.isDraft ? 'text-muted-foreground' : 'text-success',
+                    )} />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1">
+                        <span className="text-[10px] font-mono text-primary shrink-0">#{pr.number}</span>
+                        <span className="text-[11px] text-foreground truncate">{pr.title}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        <span className="text-[9px] font-mono text-muted-foreground truncate">
+                          {pr.headRefName} → {pr.baseRefName}
+                        </span>
+                        <span className="flex items-center gap-1 ml-auto shrink-0">
+                          <span className="text-[9px] text-success">+{pr.additions}</span>
+                          <span className="text-[9px] text-destructive">-{pr.deletions}</span>
+                          <span className="text-[9px] text-muted-foreground">{pr.changedFiles} files</span>
+                        </span>
+                      </div>
+                    </div>
+                    <a
+                      href={pr.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="p-0.5 rounded hover:bg-secondary text-muted-foreground hover:text-foreground shrink-0 mt-0.5"
+                      onClick={e => e.stopPropagation()}
+                      title="Open on GitHub"
+                    >
+                      <ExternalLink className="w-2.5 h-2.5" />
+                    </a>
+                  </button>
+                  {expandedPR === pr.number && (
+                    <div className="ml-4 border-l border-primary/20 pl-1.5">
+                      {prFilesLoading && (
+                        <div className="px-1 py-1.5 text-[10px] text-muted-foreground flex items-center gap-1">
+                          <RefreshCw className="w-2.5 h-2.5 animate-spin" /> Loading files...
+                        </div>
+                      )}
+                      {!prFilesLoading && prFiles.map(f => (
+                        <div
+                          key={f.path}
+                          className="flex items-center gap-1 px-1 py-0.5 text-[10px] hover:bg-secondary/30 transition-colors cursor-pointer rounded"
+                          onClick={() => onFileClick?.(effectiveState.root + '/' + f.path)}
+                        >
+                          <File className="w-2.5 h-2.5 text-muted-foreground shrink-0" />
+                          <span className="truncate flex-1 text-foreground">{f.path}</span>
+                          {f.binary ? (
+                            <span className="text-muted-foreground shrink-0">binary</span>
+                          ) : (
+                            <>
+                              <span className="text-success shrink-0">+{f.additions}</span>
+                              <span className="text-destructive shrink-0">-{f.deletions}</span>
+                            </>
+                          )}
+                        </div>
+                      ))}
+                      {!prFilesLoading && prFiles.length === 0 && (
+                        <div className="px-1 py-1 text-[10px] text-muted-foreground">No files</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+              {!prsLoading && (
+                <button
+                  className="flex items-center gap-1 px-2 py-1 w-full text-[10px] text-muted-foreground hover:text-foreground hover:bg-secondary/30 transition-colors"
+                  onClick={loadPRs}
+                >
+                  <RefreshCw className="w-2.5 h-2.5" /> Refresh
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* branch comparison */}
+        <div className="mt-1">
+          <button
+            className="flex items-center gap-1 px-2 py-1 w-full text-left hover:bg-secondary/50 transition-colors"
+            onClick={() => {
+              const opening = !showCompare;
+              setShowCompare(v => !v);
+              if (opening) {
+                setCompareResult(null);
+                loadBranches();
+              }
+            }}
+          >
+            {showCompare ? <ChevronDown className="w-3 h-3 shrink-0" /> : <ChevronRight className="w-3 h-3 shrink-0" />}
+            <ArrowLeftRight className="w-3 h-3 shrink-0 text-muted-foreground" />
+            <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Compare Branches</span>
+          </button>
+          {showCompare && (
+            <div className="px-2 py-1.5 space-y-1.5">
+              <div className="flex items-center gap-1.5">
+                <div className="flex-1 min-w-0">
+                  <label className="text-[9px] text-muted-foreground uppercase tracking-wider mb-0.5 block">Base</label>
+                  <select
+                    className="w-full px-1.5 py-1 text-[10px] bg-secondary/30 border border-border rounded outline-none focus:border-primary/50"
+                    value={compareBase}
+                    onChange={e => { setCompareBase(e.target.value); setCompareResult(null); }}
+                  >
+                    <option value="">Select...</option>
+                    {branches.filter(b => !b.remote).map(b => (
+                      <option key={b.name} value={b.name}>{b.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <ArrowLeftRight className="w-3 h-3 text-muted-foreground shrink-0 mt-3" />
+                <div className="flex-1 min-w-0">
+                  <label className="text-[9px] text-muted-foreground uppercase tracking-wider mb-0.5 block">Compare</label>
+                  <select
+                    className="w-full px-1.5 py-1 text-[10px] bg-secondary/30 border border-border rounded outline-none focus:border-primary/50"
+                    value={compareHead}
+                    onChange={e => { setCompareHead(e.target.value); setCompareResult(null); }}
+                  >
+                    <option value="">Select...</option>
+                    {branches.filter(b => !b.remote).map(b => (
+                      <option key={b.name} value={b.name}>{b.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full h-6 text-[10px]"
+                disabled={!compareBase || !compareHead || compareBase === compareHead || compareLoading}
+                onClick={runBranchCompare}
+              >
+                {compareLoading ? 'Comparing...' : 'Compare'}
+              </Button>
+              {compareResult && (
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 text-[10px]">
+                    <span className="text-muted-foreground">{compareResult.files.length} files</span>
+                    <span className="text-success">+{compareResult.totalAdditions}</span>
+                    <span className="text-destructive">-{compareResult.totalDeletions}</span>
+                    <span className="text-muted-foreground ml-auto">{compareResult.commits.length} commits</span>
+                  </div>
+                  <div className="border border-border/60 rounded overflow-hidden">
+                    {compareResult.files.length === 0 && (
+                      <div className="px-2 py-2 text-[10px] text-muted-foreground text-center">Branches are identical</div>
+                    )}
+                    {compareResult.files.map(f => {
+                      const total = f.additions + f.deletions;
+                      const addPct = total > 0 ? Math.round((f.additions / total) * 100) : 0;
+                      return (
+                        <div
+                          key={f.path}
+                          className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] hover:bg-secondary/30 transition-colors cursor-pointer border-b border-border/30 last:border-b-0"
+                          onClick={() => onFileClick?.(effectiveState.root + '/' + f.path)}
+                        >
+                          <File className="w-2.5 h-2.5 text-muted-foreground shrink-0" />
+                          <span className="truncate flex-1 text-foreground">{f.path}</span>
+                          <span className="flex items-center gap-0.5 shrink-0">
+                            {f.binary ? (
+                              <span className="text-muted-foreground">binary</span>
+                            ) : (
+                              <>
+                                <span className="text-success">+{f.additions}</span>
+                                <span className="text-destructive">-{f.deletions}</span>
+                                <span className="flex h-1.5 w-8 rounded-full overflow-hidden bg-destructive/30 ml-1">
+                                  <span className="bg-success h-full" style={{ width: `${addPct}%` }} />
+                                </span>
+                              </>
+                            )}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {compareResult.commits.length > 0 && (
+                    <div className="mt-1">
+                      <div className="text-[9px] text-muted-foreground uppercase tracking-wider mb-0.5">Commits</div>
+                      {compareResult.commits.slice(0, 10).map(c => (
+                        <div key={c.hash} className="flex items-center gap-1 px-1 py-0.5 text-[10px]">
+                          <span className="font-mono text-primary shrink-0">{c.short}</span>
+                          <span className="truncate flex-1 text-foreground">{c.subject}</span>
+                          <span className="text-[9px] text-muted-foreground/50 shrink-0">{timeAgo(c.date)}</span>
+                        </div>
+                      ))}
+                      {compareResult.commits.length > 10 && (
+                        <div className="px-1 py-0.5 text-[9px] text-muted-foreground">
+                          +{compareResult.commits.length - 10} more commits
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           )}

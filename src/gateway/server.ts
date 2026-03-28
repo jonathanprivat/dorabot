@@ -5313,6 +5313,96 @@ export async function startGateway(opts: GatewayOptions): Promise<Gateway> {
           }
         }
 
+        case 'git.prs': {
+          const repoRoot = params?.path as string;
+          if (!repoRoot) return { id, error: 'path required' };
+          const resolved = resolve(repoRoot);
+          try {
+            const { execFileSync } = await import('node:child_process');
+            const raw = execFileSync('gh', [
+              'pr', 'list', '--state', 'open', '--author', '@me',
+              '--json', 'number,title,headRefName,baseRefName,state,isDraft,additions,deletions,changedFiles,url,createdAt,updatedAt',
+              '--limit', '20',
+            ], { cwd: resolved, encoding: 'utf-8', timeout: 15000 });
+            const prs = JSON.parse(raw || '[]');
+            if (!Array.isArray(prs)) return { id, error: 'unexpected gh output' };
+            return { id, result: { prs } };
+          } catch (err) {
+            if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+              return { id, result: { prs: [], ghMissing: true } };
+            }
+            const msg = err instanceof Error ? err.message : String(err);
+            // gh auth or connectivity issues: return empty with a hint rather than a raw error
+            if (msg.includes('auth') || msg.includes('login') || msg.includes('token')) {
+              return { id, result: { prs: [], ghAuthError: true } };
+            }
+            return { id, error: msg };
+          }
+        }
+
+        case 'git.prDiff': {
+          const repoRoot = params?.path as string;
+          const prNumber = Number(params?.number);
+          if (!repoRoot || !Number.isInteger(prNumber) || prNumber <= 0) return { id, error: 'path and a positive integer number required' };
+          const resolved = resolve(repoRoot);
+          try {
+            const { execFileSync } = await import('node:child_process');
+            const statRaw = execFileSync('gh', [
+              'pr', 'view', String(prNumber),
+              '--json', 'files',
+            ], { cwd: resolved, encoding: 'utf-8', timeout: 15000 });
+            const statData = JSON.parse(statRaw || '{}');
+            const rawFiles = Array.isArray(statData.files) ? statData.files : [];
+            const files = rawFiles.map((f: { path: string; additions: number; deletions: number }) => ({
+              path: f.path,
+              additions: f.additions || 0,
+              deletions: f.deletions || 0,
+            }));
+            return { id, result: { files } };
+          } catch (err) {
+            return { id, error: err instanceof Error ? err.message : String(err) };
+          }
+        }
+
+        case 'git.branchCompare': {
+          const repoRoot = params?.path as string;
+          const base = params?.base as string;
+          const compare = params?.compare as string;
+          if (!repoRoot || !base || !compare) return { id, error: 'path, base, and compare required' };
+          // Allowlist branch name characters (matches git.showFile ref validation)
+          const branchRe = /^[a-zA-Z0-9/_\-.~^]+$/;
+          if (!branchRe.test(base) || !branchRe.test(compare)) return { id, error: 'invalid branch name' };
+          if (base.includes('..') || compare.includes('..')) return { id, error: 'invalid branch name' };
+          const resolved = resolve(repoRoot);
+          try {
+            const { execFileSync } = await import('node:child_process');
+            // Get file-level diff stats
+            const numstatRaw = execFileSync('git', [
+              'diff', '--numstat', `${base}...${compare}`, '--',
+            ], { cwd: resolved, encoding: 'utf-8', timeout: 10000 }).trim();
+            const files = numstatRaw ? numstatRaw.split('\n').map(line => {
+              const [add, del, ...pathParts] = line.split('\t');
+              const path = pathParts.join('\t');
+              const isBinary = add === '-' && del === '-';
+              return { path, additions: isBinary ? 0 : (Number(add) || 0), deletions: isBinary ? 0 : (Number(del) || 0), binary: isBinary };
+            }) : [];
+            // Get commit list
+            const logRaw = execFileSync('git', [
+              'log', '--format=%H%x00%h%x00%s%x00%an%x00%aI', `${base}..${compare}`,
+              '--max-count=50', '--',
+            ], { cwd: resolved, encoding: 'utf-8', timeout: 5000 }).trim();
+            const commits = logRaw ? logRaw.split('\n').map(line => {
+              const [hash, short, subject, author, date] = line.split('\0');
+              return { hash, short, subject, author, date };
+            }) : [];
+            const totalAdditions = files.reduce((s, f) => s + f.additions, 0);
+            const totalDeletions = files.reduce((s, f) => s + f.deletions, 0);
+            return { id, result: { files, commits, totalAdditions, totalDeletions, base, compare } };
+          } catch (err) {
+            return { id, error: err instanceof Error ? err.message : String(err) };
+          }
+        }
+
         case 'shell.spawn': {
           const shellId = params?.shellId as string;
           const cols = (params?.cols as number) || 80;
