@@ -4,7 +4,7 @@ copyright: Copyright 2026 Ishan Nagpal
 
 publish:
   provider: github
-  owner: suitedaces
+  owner: jonathanprivat
   repo: dorabot
   releaseType: release
 
@@ -38,18 +38,15 @@ mac:
   target:
     - target: dir
       arch:
-        - arm64
+        - x64
     - target: zip
       arch:
-        - arm64
-    - target: dmg
-      arch:
-        - arm64
+        - x64
   hardenedRuntime: true
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
   gatekeeperAssess: false
-  notarize: true
+  notarize: false
   extendInfo:
     NSDesktopFolderUsageDescription: "dorabot needs access to your Desktop to read and manage files."
     NSDocumentsFolderUsageDescription: "dorabot needs access to Documents to read and manage files."

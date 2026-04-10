@@ -7,6 +7,12 @@ import type { Provider, ProviderRunOptions, ProviderMessage, ProviderAuthStatus,
 import { guardImages } from './image-guard.js';
 import { DORABOT_DIR, CLAUDE_KEY_PATH, CLAUDE_OAUTH_PATH } from '../workspace.js';
 import { getSecretStorageBackend, keychainDelete, keychainLoad, keychainStore, type SecretStorageBackend } from '../auth/keychain.js';
+import {
+  isMultiAccountEnabled, loadActiveTokens, persistActiveTokens,
+  rotateAccount, getActiveSlot, getAccountSummary, listAccounts,
+  addAccount as addMultiAccount, removeAccount as removeMultiAccount,
+  setActiveSlot, migrateFromLegacy, loadSlotTokens, persistSlotTokens,
+} from '../auth/multi-account.js';
 
 // ── Node binary resolution ──────────────────────────────────────────
 // Electron apps get a minimal PATH. Resolve the full path to node once at startup
@@ -184,6 +190,10 @@ export function getClaudeTokenState(): {
 }
 
 function loadOAuthTokens(): OAuthTokens | null {
+  // Multi-account: load from active slot
+  if (isMultiAccountEnabled()) {
+    return loadActiveTokens();
+  }
   const raw = keychainLoad(KEYCHAIN_OAUTH_ACCOUNT);
   if (raw) {
     try {
@@ -202,6 +212,12 @@ function loadOAuthTokens(): OAuthTokens | null {
 
 function persistOAuthTokens(tokens: OAuthTokens): void {
   reconnectRequired = false;
+  // Multi-account: persist to active slot
+  if (isMultiAccountEnabled()) {
+    persistActiveTokens(tokens);
+    scheduleTokenRefresh(tokens);
+    return;
+  }
   const savedToKeychain = keychainStore(KEYCHAIN_OAUTH_ACCOUNT, JSON.stringify(tokens));
   if (savedToKeychain) {
     scheduleTokenRefresh(tokens);
@@ -367,6 +383,12 @@ export type AuthMethod = 'api_key' | 'cli_keychain' | 'dorabot_oauth' | 'none';
 /** Determine which auth method will be used (no side effects) */
 export function getActiveAuthMethod(): AuthMethod {
   if (getApiKey()) return 'api_key';
+  // When multi-account is enabled, always use dorabot_oauth
+  // (CLI keychain can't be rotated between accounts)
+  if (isMultiAccountEnabled()) {
+    const tokens = loadOAuthTokens();
+    if (tokens?.access_token) return 'dorabot_oauth';
+  }
   if (cliHasOwnAuth()) return 'cli_keychain';
   const tokens = loadOAuthTokens();
   if (tokens?.access_token) return 'dorabot_oauth';
@@ -745,6 +767,11 @@ export class ClaudeProvider implements Provider {
       await ensureOAuthToken();
     }
 
+    // Multi-account: log which account is being used
+    if (isMultiAccountEnabled()) {
+      console.log(`[claude] multi-account active: ${getAccountSummary()}`);
+    }
+
     // ── Async generator message feed (buffett pattern) ──────────────
     // Instead of passing a string prompt to query(), we create an async
     // generator that keeps the SDK CLI process alive for message injection.
@@ -936,6 +963,13 @@ export class ClaudeProvider implements Provider {
     let sessionId = '';
     let usage = { inputTokens: 0, outputTokens: 0, totalCostUsd: 0 };
 
+    const RATE_LIMIT_PATTERNS = [
+      'rate limit', 'rate_limit', 'limit reached', 'rate-limited',
+      'too many requests', 'usage cap', 'quota exceeded',
+    ];
+    const containsRateLimit = (text: string): boolean =>
+      RATE_LIMIT_PATTERNS.some(p => text.toLowerCase().includes(p));
+
     try {
       for await (const msg of q) {
         yield msg as ProviderMessage;
@@ -961,12 +995,150 @@ export class ClaudeProvider implements Provider {
             outputTokens: u?.output_tokens || 0,
             totalCostUsd: (m.total_cost_usd as number) || 0,
           };
+
+          // ── Multi-account: detect rate limit in result and rotate ──
+          if (isMultiAccountEnabled()) {
+            const resultStr = JSON.stringify(m);
+            if (containsRateLimit(resultStr)) {
+              const rotated = rotateAccount();
+              if (rotated) {
+                console.log(`[claude] rate limit detected, rotated to account: ${rotated.label} (slot ${rotated.slot})`);
+                const newTokens = loadActiveTokens();
+                if (newTokens?.access_token) {
+                  process.env.CLAUDE_CODE_OAUTH_TOKEN = newTokens.access_token;
+                  scheduleTokenRefresh(newTokens);
+                }
+                yield {
+                  type: 'system',
+                  subtype: 'info',
+                  message: `Rate limit hit. Switched to account: ${rotated.label}. Next query will use the new account.`,
+                } as unknown as ProviderMessage;
+              }
+            }
+          }
         }
+      }
+    } catch (err) {
+      // ── Multi-account: catch rate limit errors thrown by the SDK ──
+      if (isMultiAccountEnabled()) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        if (containsRateLimit(errMsg)) {
+          const rotated = rotateAccount();
+          if (rotated) {
+            console.log(`[claude] rate limit error caught, rotated to account: ${rotated.label} (slot ${rotated.slot})`);
+            const newTokens = loadActiveTokens();
+            if (newTokens?.access_token) {
+              process.env.CLAUDE_CODE_OAUTH_TOKEN = newTokens.access_token;
+              scheduleTokenRefresh(newTokens);
+            }
+            yield {
+              type: 'system',
+              subtype: 'info',
+              message: `Rate limit error. Switched to account: ${rotated.label}. Please retry your query.`,
+            } as unknown as ProviderMessage;
+          } else {
+            throw err;
+          }
+        } else {
+          throw err;
+        }
+      } else {
+        throw err;
       }
     } finally {
       closed = true;
     }
 
     return { result, sessionId, usage };
+  }
+
+  // ── Multi-account management methods ───────────────────────────────
+
+  /** Start OAuth flow for adding a second (or Nth) account. */
+  async loginSecondAccount(): Promise<{ authUrl: string; loginId: string }> {
+    return this.loginWithOAuth();
+  }
+
+  /** Complete OAuth for a second account and store in next available slot. */
+  async completeSecondAccountLogin(loginId: string, label: string): Promise<{ slot: number | null; error?: string }> {
+    if (!this._pkceVerifier || !this._pkceState) {
+      return { slot: null, error: 'No pending OAuth flow.' };
+    }
+
+    const parts = loginId.split('#');
+    const code = parts[0];
+    const returnedState = parts[1];
+
+    if (!code) return { slot: null, error: 'Invalid auth code.' };
+    if (returnedState && returnedState !== this._pkceState) {
+      return { slot: null, error: 'OAuth state mismatch.' };
+    }
+
+    try {
+      const res = await fetch(OAUTH_TOKEN_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          grant_type: 'authorization_code',
+          code,
+          state: returnedState || this._pkceState || '',
+          redirect_uri: OAUTH_REDIRECT_URI,
+          client_id: OAUTH_CLIENT_ID,
+          code_verifier: this._pkceVerifier,
+        }),
+      });
+
+      if (!res.ok) {
+        return { slot: null, error: `Token exchange failed (${res.status})` };
+      }
+
+      const data = await res.json() as { access_token: string; refresh_token: string; expires_in?: number };
+      const tokens: OAuthTokens = {
+        access_token: data.access_token,
+        refresh_token: data.refresh_token,
+        expires_at: Date.now() + ((data.expires_in || 28800) * 1000),
+      };
+
+      this._pkceVerifier = null;
+      this._pkceState = null;
+      this._pkceLoginId = null;
+
+      const slot = addMultiAccount(tokens, label);
+      if (slot === null) {
+        return { slot: null, error: 'All account slots are full (max 4).' };
+      }
+      return { slot };
+    } catch (err) {
+      return { slot: null, error: err instanceof Error ? err.message : 'Token exchange failed' };
+    }
+  }
+
+  /** Get multi-account status. */
+  getMultiAccountStatus(): { enabled: boolean; accounts: { slot: number; label: string; hasTokens: boolean }[]; activeSlot: number; summary: string } {
+    return {
+      enabled: isMultiAccountEnabled(),
+      accounts: listAccounts(),
+      activeSlot: getActiveSlot(),
+      summary: getAccountSummary(),
+    };
+  }
+
+  /** Manually switch to a specific account slot. */
+  switchAccount(slot: number): boolean {
+    const success = setActiveSlot(slot);
+    if (success) {
+      const tokens = loadActiveTokens();
+      if (tokens?.access_token) {
+        process.env.CLAUDE_CODE_OAUTH_TOKEN = tokens.access_token;
+        scheduleTokenRefresh(tokens);
+      }
+      this._cachedAuth = null;
+    }
+    return success;
+  }
+
+  /** Bootstrap: migrate existing single-account OAuth into multi-account slot 0. */
+  migrateToMultiAccount(label: string = 'Primary'): boolean {
+    return migrateFromLegacy(KEYCHAIN_OAUTH_ACCOUNT, label);
   }
 }

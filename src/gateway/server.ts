@@ -4508,6 +4508,90 @@ export async function startGateway(opts: GatewayOptions): Promise<Gateway> {
           }
         }
 
+        // ── multi-account RPCs ────────────────────────────────────
+        case 'provider.accounts.status': {
+          try {
+            const p = await getProviderByName('claude') as any;
+            if (!p.getMultiAccountStatus) return { id, error: 'Provider does not support multi-account' };
+            return { id, result: p.getMultiAccountStatus() };
+          } catch (err) {
+            return { id, error: err instanceof Error ? err.message : String(err) };
+          }
+        }
+
+        case 'provider.accounts.migrate': {
+          try {
+            const label = (params?.label as string) || 'Primary';
+            const p = await getProviderByName('claude') as any;
+            if (!p.migrateToMultiAccount) return { id, error: 'Provider does not support multi-account' };
+            const migrated = p.migrateToMultiAccount(label);
+            return { id, result: { migrated } };
+          } catch (err) {
+            return { id, error: err instanceof Error ? err.message : String(err) };
+          }
+        }
+
+        case 'provider.accounts.add': {
+          try {
+            const p = await getProviderByName('claude') as any;
+            if (!p.loginSecondAccount) return { id, error: 'Provider does not support multi-account' };
+            const { authUrl, loginId } = await p.loginSecondAccount();
+            broadcast({ event: 'provider.oauth_url', data: { provider: 'claude', authUrl, loginId, purpose: 'add-account' } });
+            return { id, result: { authUrl, loginId } };
+          } catch (err) {
+            return { id, error: err instanceof Error ? err.message : String(err) };
+          }
+        }
+
+        case 'provider.accounts.add.complete': {
+          try {
+            const loginId = params?.loginId as string;
+            const label = params?.label as string;
+            if (!loginId || !label) return { id, error: 'loginId and label required' };
+            const p = await getProviderByName('claude') as any;
+            if (!p.completeSecondAccountLogin) return { id, error: 'Provider does not support multi-account' };
+            const result = await p.completeSecondAccountLogin(loginId, label);
+            if (result.slot !== null) {
+              broadcast({ event: 'provider.accounts.updated', data: p.getMultiAccountStatus() });
+            }
+            return { id, result };
+          } catch (err) {
+            return { id, error: err instanceof Error ? err.message : String(err) };
+          }
+        }
+
+        case 'provider.accounts.switch': {
+          try {
+            const slot = params?.slot as number;
+            if (slot === undefined) return { id, error: 'slot required' };
+            const p = await getProviderByName('claude') as any;
+            if (!p.switchAccount) return { id, error: 'Provider does not support multi-account' };
+            const success = p.switchAccount(slot);
+            if (success) {
+              broadcast({ event: 'provider.accounts.updated', data: p.getMultiAccountStatus() });
+            }
+            return { id, result: { success } };
+          } catch (err) {
+            return { id, error: err instanceof Error ? err.message : String(err) };
+          }
+        }
+
+        case 'provider.accounts.remove': {
+          try {
+            const slot = params?.slot as number;
+            if (slot === undefined) return { id, error: 'slot required' };
+            const p = await getProviderByName('claude') as any;
+            const { removeAccount: removeAcct } = await import('../auth/multi-account.js');
+            const success = removeAcct(slot);
+            if (success) {
+              broadcast({ event: 'provider.accounts.updated', data: p.getMultiAccountStatus() });
+            }
+            return { id, result: { success } };
+          } catch (err) {
+            return { id, error: err instanceof Error ? err.message : String(err) };
+          }
+        }
+
         // ── config RPCs ──────────────────────────────────────────
         case 'config.get': {
           const safe = structuredClone(config);
